@@ -1,7 +1,8 @@
 function I = perispecinterpmat(Nout,Nin)
 % PERISPECINTERPMAT.  Return dense matrix interpolating between PTR grids
 %
-% See BIE2D/utils/perispecinterp for convention. Uses N calls to that for now.
+% See BIE2D/utils/perispecinterp for convention.
+% Uses N calls to that for now, so is O(N^2 ln N), not the best.
 
 I = nan(Nout,Nin);
 for i=1:Nin
