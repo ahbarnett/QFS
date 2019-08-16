@@ -13,12 +13,14 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %                A = potential evaluation matrix, An = target-normal eval mat.
 %  srcker = QFS source function handle of same interface as lpker.
 %  tol = desired acc of eval
-%  o = opts struct ...
-%       o.srctype = monopoles, or CFIE (for Helm),...
+%  o = opts struct
+%       o.verb = 0,1,... verbosity
+%       o.srctype = monopoles, or CFIE (for Helm),... [not implemented]
 %
 % Outputs: qfs struct (object) q containing fields:
 %  s - QFS source curve with s.x nodes, s.w weights, and s.nx normals.
-%  qfsco - function handle returning QFS src density coeffs from bdry density.
+%  qfsco - function handle returning QFS src density coeffs from bdry density
+%          (also works for stacks of densities as cols)
 %  Q1, Q2 - two matrices that are needed for getdens
 %           so that srcdens = Q2*(Q1*dens)
 %
@@ -30,38 +32,56 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 % Barnett 8/15/19
 if nargin==0, test_qfs_create; return; end
 if nargin<6, o=[]; end
+if ~isfield(o,'verb'), o.verb = 0; end
+if ~isfield(o,'factor'), o.factor = 's'; end
 N = b.N;                      % nodes on input bdry
 
 % QFS source curve
 srcfac = 1.0;
-FF = 0.3;                       % David's fudge "factor" (0.37 gains 1 digit)
+FF = 0*0.3;                       % David's fudge "factor" (0.37 gains 1 digit)
 alpha = log(1/tol)/(2*pi) + FF; % # h-units away needed for tol b<-s (David's M)
 valid = false;
 while ~valid                    % move in & upsample src curve until valid...
-  imd = -sign_from_side(interior) * alpha * (2*pi)/(srcfac*N); % 2pi facs cancel
-  s = shiftedbdry(b,imd,srcfac);
+  imds = -sign_from_side(interior) * alpha * (2*pi)/(srcfac*N); %2pi facs cancel
+  s = shiftedbdry(b,imds,srcfac);
   valid = isempty(selfintersect(real(s.x),imag(s.x)));  % *** David's min speed?
   if ~valid, srcfac = 1.1*srcfac; end
 end
-% *** should also scale the check curve based on src?
 
 % QFS check (collocation) curve
-bfac = 3.0*srcfac;  % bdry upsampling  *** fix
-alpha = log(1/tol)/(2*pi);   % # hfine-units away needed for tol c<-bf
-Nf = ceil(bfac*N/2)*2;   % insure even
-imd = sign_from_side(interior) * alpha * 2*pi/Nf;  % 2pi facs cancel
-c = shiftedbdry(b,imd,1.0);
-valid = isempty(selfintersect(real(c.x),imag(c.x))); if ~valid, 'chk invalid', end
-fprintf('QFS: srcfac=%.3g, bdryfac=%.3g\n',srcfac,bfac)
+imd = imds*(1-log(eps)/log(tol)); % <0, use in/out ratio instead of David 5.7-M
+valid = false;
+while ~valid                    % move in check curve until valid...
+  c = shiftedbdry(b,imd,1.0);
+  valid = isempty(selfintersect(real(c.x),imag(c.x)));  % *** David's min speed?
+  if ~valid, imd = imd/1.1; end
+end
+FF = 0.5;              % bump up upsampling 
+bfac = FF + log(1/tol)/(-imd) / N;    % bdry upsampling fac based on heuristic
+if bfac<1.0, bfac=1.0; end            % since why bother
+%bfac = 3.0*srcfac;  % old plain fixed bdry upsampling
+Nf = ceil(bfac*N/2)*2;           % fine bdry, insure even
+
+if o.verb, fprintf('QFS: \tsrc (fac=%.3g,imd=%.3g)   \tbdry(fac=%.3g,imd=%.3g)\n',srcfac,imds,bfac,imd); end
 
 bf = setupquad(b,Nf);  % fine (upsampled) bdry
 K = lpker(c,bf);       % eval at check from desired upsampled layer pot (c<-bf)
-I = perispecinterpmat(Nf,N);  % upsample by bfac
-E = srcker(c,s);       % fill c<-s mat
-[U,S,V] = svd(E);
-reps = 1e-14;
-r = sum(diag(S)>reps); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank, trunc
-q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*(K*I);  % the 2 factors
+I = perispecinterpmat(Nf,N);  % mat to upsample by bfac
+E = srcker(c,s);       % fill c<-s mat (becomes fat if src upsamp from invalid)
+                       % (differs from David who keeps E N*N, then src upsamp)
+reps = 1e-15;          % relative eps to set rank truncation
+if o.factor=='s'       % dense factor it
+  [U,S,V] = svd(E);
+  r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
+  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*(K*I);  % the 2 factors
+elseif o.factor=='l'   % David's preferred. *** not working for me
+  s1 = shiftedbdry(b,imds,1.0); E1 = srcker(c,s1);  % David's square E1
+  Is = perispecinterpmat(s.N,N);  % mat to upsample from N to N_src
+  [L,U] = lu(E1); q.Q2 = Is*(U\eye(N)); q.Q1 = L\(K*I);
+elseif o.factor=='q'   % was not good for fat or square.
+  [Q,R] = qr(E); q.Q2 = pinv(R); q.Q1 = Q'*(K*I);   % *** test
+  %[Q,R] = qr(E',0); q.Q2 = Q; q.Q1 = (R\(K*I)')';  % turn fat into tall ** debug
+end
 q.qfsco = @(dens) q.Q2*(q.Q1*dens);                % func evals coeffs from dens
 
 q.b = b; q.bf = bf; q.s = s; q.c = c;  % copy out
@@ -110,11 +130,11 @@ for interior = [false true], interior  % ------- loop over topologies
     elseif lp=='D'
       lpker = @LapDLP;
       lpclose = @LapDLP_closeglobal;
-      lpfun = @(x,t) real(conj(x-b.Z(t)).*bny(t))./(2*pi*abs(x-b.Z(t)).^2);  % Lap DLP
+      lpfun = @(x,t) real(conj(x-b.Z(t)).*bny(t))./(2*pi*abs(x-b.Z(t)).^2);  % Lap DLP formula (dot done in C)
     end
     srcker = @LapSLP;  % fine for Laplace; will need CFIE for Helmholtz
     tol = 1e-12;
-    q = qfs_create(b,interior,lpker,srcker,tol);
+    q = qfs_create(b,interior,lpker,srcker,tol,struct('verb',1));
     densfun = @(t) exp(sin(t + 1));       % analytic density wrt param
     dens = densfun(b.t);        % density samples
     dists = [1e-3 0.3]';          % distances from bdry to test, must be col vec
