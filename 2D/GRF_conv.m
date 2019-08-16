@@ -1,14 +1,21 @@
-function GRF_conv(tol,verb)
+function GRF_conv(tol,verb,curvemeth)
 % QFS convergence test for GRF, 2D, one smooth curve. Compares to sing quad.
 %
-% Now a function, allowing loops over tol:
-% GRF_conv(tol,verb)
-% produces plot in current figure
-
+% GRF_conv(tol,verb) produces a plot in current figure.
+%  tol - requested QFS tol
+%  verb - verbosity of text output (fig always produced)
+%
+% See: GRF_conv_multitol.m for example usage
+%
+% todo: ext case. Helm (needs new BIE2D kernels)
+%
 % Barnett 8/15/19
 
 if nargin<1, tol = 1e-10; end          % QFS (don't make too close to emach!)
 if nargin<2, verb = 0; end
+o = []; o.factor='s';             % QFS opts
+o.verb = (verb>1);
+if nargin>=3, o.curvemeth=curvemeth; end
 
 k = 0;                 % wavenumber (0 for now)
 a = .3; w = 5;         % smooth wobbly radial shape params
@@ -28,14 +35,14 @@ else    % ... Helm
 end
   
 srcker = SLP;                     % choose QFS src rep (*** fix when Helm)
-o = []; o.factor='s'; o.verb = verb;  % QFS opts
 sgn = -1+2*interior;              % David convention (+1 if interior)
 
 Ns = 100:30:600;
 es = nan(1,numel(Ns)); cns=nan*Ns;                    % save errors, etc
-for i=1:numel(Ns); N=Ns(i);        % ---------- N convergence
+for i=1:numel(Ns); N=Ns(i);       % ---------- N convergence
   b = wobblycurve(1,a,w,N);
   qs = qfs_create(b,interior,SLP,srcker,tol,o);       % make QFS objects for SLP
+  if verb==1, o.verb = (i==numel(Ns)); end            % verb=1: print last only
   qd = qfs_create(b,interior,DLP,srcker,tol,o);       % DLP
   tau = -sgn*f(b.x);                                  % GRF densities (tau=DLP)
   sig = sgn*(fx(b.x).*real(b.nx) + fy(b.x).*imag(b.nx));  % SLP = n-deriv
@@ -49,7 +56,7 @@ for i=1:numel(Ns); N=Ns(i);        % ---------- N convergence
   es(2,i) = sqrt(sum(b.w .* abs(ukerr).^2));          % its L_2 bdry err
   es(3,i) = srcker(trg,qs.s,co) - f(trg.x);           % QFS far err
   es(4,i) = LapSLP(trg,b,sig) + LapDLP(trg,b,tau) - f(trg.x);  % native far err
-end                                % ----------
+end                               % ----------
 %disp([Ns', es'])
 %figure(1); clf;  % for a script
 semilogy(Ns,abs(es),'+-'); hold on; plot(Ns,cns,'o-');

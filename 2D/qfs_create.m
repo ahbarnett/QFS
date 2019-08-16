@@ -21,8 +21,8 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %  s - QFS source curve with s.x nodes, s.w weights, and s.nx normals.
 %  qfsco - function handle returning QFS src density coeffs from bdry density
 %          (also works for stacks of densities as cols)
-%  Q1, Q2 - two matrices that are needed for getdens
-%           so that srcdens = Q2*(Q1*dens)
+%  Q1, Q2 - two matrix factors of sfb matrix, that are needed for qfsco
+%           so that qfssrcdens = Q2*(Q1*givenbdrydens)
 %
 % With no arguments, self-test is done.
 %
@@ -34,73 +34,88 @@ if nargin==0, test_qfs_create; return; end
 if nargin<6, o=[]; end
 if ~isfield(o,'verb'), o.verb = 0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
+if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
 N = b.N;                      % nodes on input bdry
 
 % QFS source curve
-srcfac = 1.0;
-FF = 0*0.3;                       % David's fudge "factor" (0.37 gains 1 digit)
-alpha = log(1/tol)/(2*pi) + FF; % # h-units away needed for tol b<-s (David's M)
+FF = 0.0;                       % David's fudge "factor" (0.37 gains 1 digit)
+if o.curvemeth=='n', FF = 0.5;  end   % since worse curves (0.5 good for ext)
+imds = -sign_from_side(interior) * log(1/tol)/N;   % initial guess, tol @ fac=1
 valid = false;
 while ~valid                    % move in & upsample src curve until valid...
-  imds = -sign_from_side(interior) * alpha * (2*pi)/(srcfac*N); %2pi facs cancel
-  s = shiftedbdry(b,imds,srcfac);
-  valid = isempty(selfintersect(real(s.x),imag(s.x)));  % *** David's min speed?
-  if ~valid, srcfac = 1.1*srcfac; end
+  srcfac = (log(1/tol)+2*pi*FF)/abs(imds) / N;
+  s = shiftedbdry(b,imds,srcfac,o);
+  valid = isempty(selfintersect(real(s.x),imag(s.x)));
+  if o.verb, fprintf('min(s.sp)/min(b.sp)=%.3g\n',min(s.sp)/min(b.sp)); end
+  if o.curvemeth=='n', valid = valid & min(s.sp)>0.5*min(b.sp); end  % David's
+  if ~valid, imds = imds/1.1; end   % bring closer, from which fac will be set
 end
 
-% QFS check (collocation) curve
+% QFS check (collocation) curve, specify by its imag shift (imd)
 imd = imds*(1-log(eps)/log(tol)); % <0, use in/out ratio instead of David 5.7-M
 valid = false;
 while ~valid                    % move in check curve until valid...
-  c = shiftedbdry(b,imd,1.0);
-  valid = isempty(selfintersect(real(c.x),imag(c.x)));  % *** David's min speed?
+  c = shiftedbdry(b,imd,1.0,o);
+  valid = isempty(selfintersect(real(c.x),imag(c.x)));
   if ~valid, imd = imd/1.1; end
 end
-FF = 0.5;              % bump up upsampling 
-bfac = FF + log(1/tol)/(-imd) / N;    % bdry upsampling fac based on heuristic
+bfac = log(1/eps)/abs(imd) / N;       % bdry c<-bf upsampling: NB emach not tol!
 if bfac<1.0, bfac=1.0; end            % since why bother
 %bfac = 3.0*srcfac;  % old plain fixed bdry upsampling
 Nf = ceil(bfac*N/2)*2;           % fine bdry, insure even
-
-if o.verb, fprintf('QFS: \tsrc (fac=%.3g,imd=%.3g)   \tbdry(fac=%.3g,imd=%.3g)\n',srcfac,imds,bfac,imd); end
-
 bf = setupquad(b,Nf);  % fine (upsampled) bdry
+q.b = b; q.bf = bf; q.s = s; q.c = c;  % copy out (q.s is only crucial)
+if o.verb, fprintf('QFS N=%4d tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=%.2f,d=%6.3f\n',N,tol,srcfac,imds,bfac,imd); end
+if o.verb>2, figure; qfs_show(q); axis equal tight; drawnow; end
+
 K = lpker(c,bf);       % eval at check from desired upsampled layer pot (c<-bf)
 I = perispecinterpmat(Nf,N);  % mat to upsample by bfac
+cfb = K*I;             % matrix giving check vals from original bdry dens
 E = srcker(c,s);       % fill c<-s mat (becomes fat if src upsamp from invalid)
                        % (differs from David who keeps E N*N, then src upsamp)
+% Now factor the cfb matrix...
 reps = 1e-15;          % relative eps to set rank truncation
-if o.factor=='s'       % dense factor it
+if o.factor=='s'       % trunc SVD - guaranteed
   [U,S,V] = svd(E);
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
-  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*(K*I);  % the 2 factors
+  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb;   % the 2 factors
 elseif o.factor=='l'   % David's preferred. *** not working for me
-  s1 = shiftedbdry(b,imds,1.0); E1 = srcker(c,s1);  % David's square E1
+  s1 = shiftedbdry(b,imds,1.0,o); E1 = srcker(c,s1);  % David's square E1
   Is = perispecinterpmat(s.N,N);  % mat to upsample from N to N_src
-  [L,U] = lu(E1); q.Q2 = Is*(U\eye(N)); q.Q1 = L\(K*I);
-elseif o.factor=='q'   % was not good for fat or square.
-  [Q,R] = qr(E); q.Q2 = pinv(R); q.Q1 = Q'*(K*I);   % *** test
-  %[Q,R] = qr(E',0); q.Q2 = Q; q.Q1 = (R\(K*I)')';  % turn fat into tall ** debug
+  [L,U] = lu(E1); q.Q2 = Is*(U\eye(N)); q.Q1 = L\cfb;
+elseif o.factor=='q'   % QR, was not good for fat or square.
+  [Q,R] = qr(E); q.Q2 = pinv(R); q.Q1 = Q'*cfb;     % *** test
+  %[Q,R] = qr(E',0); q.Q2 = Q; q.Q1 = (R\cfb')';     % turn fat into tall ** debug
 end
 q.qfsco = @(dens) q.Q2*(q.Q1*dens);                % func evals coeffs from dens
 
-q.b = b; q.bf = bf; q.s = s; q.c = c;  % copy out
-
 
 % ............................ helper functions .....................
-function c = shiftedbdry(b,imagd,fac)
-% use imaginary displacement of complexification of boundary parameterization,
-% by given imag dist, with given upsampling factor, from boundary object b.
-% (imagd>0 is in interior)
+function c = shiftedbdry(b,imagd,fac,o)
+% Create quasi-parallel fac-upsampled closed curve from given curve b.
+% Uses imaginary displacement of complexification of boundary parameterization,
+% or simple normal displacement.
+% imagd - controls distance (either actual imag shift, or equiv normal shift).
+%         imagd>0 is in interior.
+% Opts:
+% o.curvemeth = 'i' (imag shift in complex param), 'n' (speed * normal displ).
+% o.forcenum field forces numerical shift via x,nx, even if analytic avail.
+if nargin<4, o=[]; end
+if isfield(o,'forcenum'), b = rmfield(b,'Zp'); end  % local
 
-Nf = ceil(fac*b.N/2)*2;          % insure even
-if isfield(b,'Zp')               % wrap analytic curve defn
+% *** todo: add case making Z,Zp from b.x only (no analytic)
+% via fft then rebuilding Z, Zp - see larrycup.m
+
+Nf = ceil(fac*b.N/2)*2;          % pick new N, insure even
+if o.curvemeth=='i'              % imag shift analytic curve defn
   c.Z = @(t) b.Z(t + 1i*imagd);
   c.Zp = @(t) b.Zp(t + 1i*imagd);
-  c = setupquad(c,Nf);
-else
-  % *** add case of purely from nodes b.x
+elseif o.curvemeth=='n'          % plain speed-normal displacement
+  cf.x = perispecinterp(b.x,Nf); % resample bdry
+  cf = setupquad(cf);            % rebuild node info spectrally
+  c.x = cf.x - imagd*cf.sp.*cf.nx;  % now just use moved nodes
 end
+c = setupquad(c,Nf);
 
 function a = sign_from_side(interior)  % David's convention
 a = -1; if interior, a = 1; end
@@ -117,9 +132,10 @@ hold on; plot([s.x, s.x+0.05*s.nx].',[c '-']);        % normals
 
 % ............................... test function ............................
 function test_qfs_create  % basic test at fixed N, vs plain adaptive integration
-verb = 0;
+warning('off','MATLAB:integral:MaxIntervalCountReached');
+verb = 1;
 a = .3; w = 5;         % smooth wobbly radial shape params
-N = 250; b = wobblycurve(1,a,w,N);
+N = 400; b = wobblycurve(1,a,w,N);  % really N here needs to grow as log(1/tol)
 for interior = [false true], interior  % ------- loop over topologies
   bny = @(t) b.Zp(t)./(1i*abs(b.Zp(t)));  % unit bdry normal func
   for lp = 'SD', lp          % .... loop over layer pot types
@@ -134,13 +150,14 @@ for interior = [false true], interior  % ------- loop over topologies
     end
     srcker = @LapSLP;  % fine for Laplace; will need CFIE for Helmholtz
     tol = 1e-12;
-    q = qfs_create(b,interior,lpker,srcker,tol,struct('verb',1));
-    densfun = @(t) exp(sin(t + 1));       % analytic density wrt param
+    o.verb = verb; o.curvemeth = 'i';   % 'n' int=1 poor, needs N larger - why?
+    q = qfs_create(b,interior,lpker,srcker,tol,o);
+    densfun = @(t) sin(7*t+cos(t)); %exp(sin(t + 1));  % analytic density wrt param
     dens = densfun(b.t);        % density samples
     dists = [1e-3 0.3]';          % distances from bdry to test, must be col vec
     t0 = -0.1;   % param to base targs on; keep away from 0 for adaptive's sake
     trg.x = b.Z(t0) - bny(t0)*sign_from_side(interior)*dists;    % targets
-    if verb, figure(1+interior); clf; qfs_show(q); plot(trg.x,'k*'); axis equal tight; end
+    if verb>1 && lp=='S', figure; qfs_show(q); plot(trg.x,'k*'); axis equal tight; title(sprintf('int=%d',interior)); axis([.5 1.5 -.5 .5]); drawnow; end
   
     ufar = lpker(trg,b,dens);  % far field (smooth) rule, bad for near
     uada = 0*ufar;             % adaptive integration of analytic func...
@@ -152,7 +169,7 @@ for interior = [false true], interior  % ------- loop over topologies
     uqfs = srcker(trg,q.s,co);
     side = 'e'; if interior, side='i'; end     % compare to barycentric...
     ucau = lpclose(trg,b,dens,side);
-    if verb, fprintf('\t\tnear trg \t\tfar trg\n')
+    if verb>1, fprintf('\t\tnear trg \t\tfar trg\n')
       fprintf('adaptive   \t'); fprintf('%.16g\t',uada)
       fprintf('\nnative (sm)\t'); fprintf('%.16g\t',ufar)
       fprintf('\nCauchy     \t'); fprintf('%.16g\t',ucau)
