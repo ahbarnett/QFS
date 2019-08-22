@@ -47,6 +47,7 @@ while ~valid                    % move in & upsample src curve until valid...
   srcfac = (log(1/tol)+2*pi*FF)/abs(imds) / N;
   s = shiftedbdry(b,imds,srcfac,o);
   valid = isempty(selfintersect(real(s.x),imag(s.x)));
+  %valid=1;   % *** force no src upsampling
   if o.verb, fprintf('min(s.sp)/min(b.sp)=%.3g\n',min(s.sp)/min(b.sp)); end
   if o.curvemeth=='n', valid = valid & min(s.sp)>0.5*min(b.sp); end  % David's
   if ~valid, imds = imds/1.1; end   % bring closer, from which fac will be set
@@ -63,7 +64,7 @@ end
 bfac = log(1/eps)/abs(imd) / N;       % bdry c<-bf upsampling: NB emach not tol!
 if bfac<1.0, bfac=1.0; end            % since why bother
 %bfac = 3.0*srcfac;  % old plain fixed bdry upsampling
-Nf = ceil(bfac*N/2)*2;           % fine bdry, insure even
+Nf = ceil(bfac*N/2)*2;               % fine bdry, insure even
 bf = setupquad(b,Nf);  % fine (upsampled) bdry
 q.b = b; q.bf = bf; q.s = s; q.c = c;  % copy out (q.s is only crucial)
 if o.verb, fprintf('QFS N=%4d tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=%.2f,d=%6.3f\n',N,tol,srcfac,imds,bfac,imd); end
@@ -76,19 +77,27 @@ E = srcker(c,s);       % fill c<-s mat (becomes fat if src upsamp from invalid)
                        % (differs from David who keeps E N*N, then src upsamp)
 % Now factor the cfb matrix...
 reps = 1e-15;          % relative eps to set rank truncation
-if o.factor=='s'       % trunc SVD - guaranteed
+if o.factor=='s'       % trunc SVD - guaranteed, but slow
   [U,S,V] = svd(E);
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
-  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb;   % the 2 factors
-elseif o.factor=='l'   % David's preferred. *** not working for me
-  s1 = shiftedbdry(b,imds,1.0,o); E1 = srcker(c,s1);  % David's square E1
-  Is = perispecinterpmat(s.N,N);  % mat to upsample from N to N_src
-  [L,U] = lu(E1); q.Q2 = Is*(U\eye(N)); q.Q1 = L\cfb;
-elseif o.factor=='q'   % QR, was not good for fat or square.
-  [Q,R] = qr(E); q.Q2 = pinv(R); q.Q1 = Q'*cfb;     % *** test
-  %[Q,R] = qr(E',0); q.Q2 = Q; q.Q1 = (R\cfb')';     % turn fat into tall ** debug
+  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors
+elseif o.factor=='l'   % David's preferred. gets only 1e-9, sq or rect :(
+  if diff(size(E))==0
+    [L,U,P] = lu(E); q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1)
+  else                 % rect case, David's projecting to NxN
+    Is = perispecinterpmat(s.N,N);     % mat to upsample from N to N_src
+    [L,U,P] = lu(E*Is); q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);
+  end
+elseif o.factor=='q'   % QR, was not good for fat nor square...
+  [Q,R] = qr(E); q.Q2 = pinv(R); q.Q1 = Q'*cfb;   % *** test
+  %[Q,R] = qr(E',0); q.Q2 = Q; q.Q1 = (R\cfb')';  % turn fat into tall ** debug
 end
-q.qfsco = @(dens) q.Q2*(q.Q1*dens);                % func evals coeffs from dens
+q.qfsco = @(dens) q.Q2*(q.Q1*dens);               % func evals coeffs from dens
+
+if 0  % test... when P=eye(N) can be as bad as 1e-3 (SLP), or O(1) (DLP) - why?
+P = perispecinterpmat(N,round(N/4)*2);   % projector to low modes
+fprintf('rel ||cfb P - E Q2 Q1 P||=%.3g\n',norm(cfb*P - E*(q.Q2*(q.Q1*P)))/norm(cfb*P))
+end
 
 
 % ............................ helper functions .....................
@@ -107,7 +116,7 @@ if isfield(o,'forcenum'), b = rmfield(b,'Zp'); end  % local
 % *** todo: add case making Z,Zp from b.x only (no analytic)
 % via fft then rebuilding Z, Zp - see larrycup.m
 
-Nf = ceil(fac*b.N/2)*2;          % pick new N, insure even
+Nf = round(fac*b.N/2)*2;         % pick new N, insure even
 if o.curvemeth=='i'              % imag shift analytic curve defn
   c.Z = @(t) b.Z(t + 1i*imagd);
   c.Zp = @(t) b.Zp(t + 1i*imagd);

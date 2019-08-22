@@ -13,7 +13,7 @@ function GRF_conv(tol,verb,curvemeth)
 
 if nargin<1, tol = 1e-10; end          % QFS (don't make too close to emach!)
 if nargin<2, verb = 0; end
-o = []; o.factor='s';             % QFS opts
+o = []; o.factor='l';             % QFS opts
 o.verb = (verb>1);
 if nargin>=3, o.curvemeth=curvemeth; end
 
