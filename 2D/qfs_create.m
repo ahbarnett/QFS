@@ -1,7 +1,7 @@
 function q = qfs_create(b,interior,lpker,srcker,tol,o)
 % QFS_CREATE.  kernel-indep QFS setup, single closed global-PTR curve in 2D
 %
-% q = qfs_mats(b,interior,lpker,srcker,tol,o)
+% q = qfs_create(b,interior,lpker,srcker,tol,o)
 %  sets up source and check boundaries, and dense matrices for computing
 %  QFS density from a given boundary layer potential density.
 %
@@ -16,8 +16,9 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %  o = opts struct
 %       o.verb = 0,1,... verbosity
 %       o.srctype = monopoles, or CFIE (for Helm),... [not implemented]
+%       o.curvemeth = 'i' imaginary displacement, 'n' normal displacement.
 %
-% Outputs: qfs struct (object) q containing fields:
+% Outputs: QFS struct (object) q containing fields:
 %  s - QFS source curve with s.x nodes, s.w weights, and s.nx normals.
 %  qfsco - function handle returning QFS src density coeffs from bdry density
 %          (also works for stacks of densities as cols)
@@ -26,7 +27,7 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %
 % With no arguments, self-test is done.
 %
-% Notes: 1) adaptive for DLP sucks (can only get 1e-9 when 1e-6 dist), so Cauchy
+% Notes: 1) adaptive for DLP sucks (can only get 1e-9 for 1e-6 dist), so Cauchy
 % still useful for close testing.
 
 % Barnett 8/15/19
@@ -116,9 +117,6 @@ elseif o.curvemeth=='n'          % plain speed-normal displacement
   c.x = cf.x - imagd*cf.sp.*cf.nx;  % now just use moved nodes
 end
 c = setupquad(c,Nf);
-
-function a = sign_from_side(interior)  % David's convention
-a = -1; if interior, a = 1; end
 
 function qfs_show(q)                 % plot all QFS geom on current fig
 b=showcurve(q.b,'k'); s=showcurve(q.s,'r'); c=showcurve(q.c,'b');
