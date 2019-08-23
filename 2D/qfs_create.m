@@ -17,13 +17,14 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %       o.verb = 0,1,... verbosity
 %       o.srctype = monopoles, or CFIE (for Helm),... [not implemented]
 %       o.curvemeth = 'i' imaginary displacement, 'n' normal displacement.
+%       o.factor = 's' (trunc SVD), 'l' (LU), 'q' (QR; not working).
 %
 % Outputs: QFS struct (object) q containing fields:
 %  s - QFS source curve with s.x nodes, s.w weights, and s.nx normals.
 %  qfsco - function handle returning QFS src density coeffs from bdry density
 %          (also works for stacks of densities as cols)
-%  Q1, Q2 - two matrix factors of sfb matrix, that are needed for qfsco
-%           so that qfssrcdens = Q2*(Q1*givenbdrydens)
+%  Q1, Q2 - two matrix factors of sfb matrix, maybe needed for qfsco
+%           so that qfssrcdens = Q2*(Q1*givenbdrydens). LU doesn't use them.
 %
 % With no arguments, self-test is done.
 %
@@ -75,28 +76,32 @@ I = perispecinterpmat(Nf,N);  % mat to upsample by bfac
 cfb = K*I;             % matrix giving check vals from original bdry dens
 E = srcker(c,s);       % fill c<-s mat (becomes fat if src upsamp from invalid)
                        % (differs from David who keeps E N*N, then src upsamp)
-% Now factor the cfb matrix...
-reps = 1e-15;          % relative eps to set rank truncation
+% Now factor the E matrix...
 if o.factor=='s'       % trunc SVD - guaranteed, but slow
+  reps = 1e-15;        % relative eps to set rank truncation
   [U,S,V] = svd(E);
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
   q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors
-elseif o.factor=='l'   % David's preferred. gets only 1e-9, sq or rect :(
+  q.qfsco = @(dens) q.Q2*(q.Q1*dens);             % func evals coeffs from dens
+elseif o.factor=='l'   % David's preferred. Q1,Q2 gets only 1e-9, sq or rect
   if diff(size(E))==0
+    Is = eye(N);       % dummy for qfsco below
     [L,U,P] = lu(E); q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1)
   else                 % rect case, David's projecting to NxN
     Is = perispecinterpmat(s.N,N);     % mat to upsample from N to N_src
-    [L,U,P] = lu(E*Is); q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);
+    [L,U,P] = lu(E*Is);
+    q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);           % Q1,Q2 *not* bkw stab: avoid
   end
+  q.qfsco = @(dens) Is*(U\(L\(P*(cfb*dens))));    % func evals coeffs from dens
 elseif o.factor=='q'   % QR, was not good for fat nor square...
   [Q,R] = qr(E); q.Q2 = pinv(R); q.Q1 = Q'*cfb;   % *** test
   %[Q,R] = qr(E',0); q.Q2 = Q; q.Q1 = (R\cfb')';  % turn fat into tall ** debug
 end
-q.qfsco = @(dens) q.Q2*(q.Q1*dens);               % func evals coeffs from dens
 
-if 0  % test... when P=eye(N) can be as bad as 1e-3 (SLP), or O(1) (DLP) - why?
-P = perispecinterpmat(N,round(N/4)*2);   % projector to low modes
-fprintf('rel ||cfb P - E Q2 Q1 P||=%.3g\n',norm(cfb*P - E*(q.Q2*(q.Q1*P)))/norm(cfb*P))
+if 0  % if the factors Q1,Q2 present, check they solve needed matrix lin sys:
+  % when P=eye(N), is as bad as 1e-3 (SLP), or O(1) (DLP) - why?
+  P = perispecinterpmat(N,round(N/4)*2);   % projector tests low modes only
+  fprintf('rel ||cfb P - E Q2 Q1 P||=%.3g\n',norm(cfb*P - E*(q.Q2*(q.Q1*P)))/norm(cfb*P))
 end
 
 
@@ -159,7 +164,7 @@ for interior = [false true], interior  % ------- loop over topologies
     tol = 1e-12;
     o.verb = verb; o.curvemeth = 'i';   % 'n' int=1 poor, needs N larger - why?
     q = qfs_create(b,interior,lpker,srcker,tol,o);
-    densfun = @(t) sin(7*t+cos(t)); %exp(sin(t + 1));  % analytic density wrt param
+    densfun = @(t) 1+sin(7*t+cos(t)); %exp(sin(t + 1));  % analytic density wrt param
     dens = densfun(b.t);        % density samples
     dists = [1e-3 0.3]';          % distances from bdry to test, must be col vec
     t0 = -0.1;   % param to base targs on; keep away from 0 for adaptive's sake
@@ -172,8 +177,8 @@ for interior = [false true], interior  % ------- loop over topologies
       uada(i) = integral(@(t) lpfun(trg.x(i),t).*abs(b.Zp(t)).*densfun(t),0,2*pi,'abstol',1e-14,'reltol',1e-14);    % kernel * speed * dens
     end
     % f = @(t) lpfun(trg.x(1),t).*abs(b.Zp(t)).*densfun(t); figure(2); tt=2*pi*(1:1e5)/1e5; plot(tt,f(tt),'-'); title('integrand');  % nasty integrand
-    co = q.qfsco(dens);
-    uqfs = srcker(trg,q.s,co);
+    co = q.qfsco(dens);                        % do QFS
+    uqfs = srcker(trg,q.s,co);                 % sum QFS srcs
     side = 'e'; if interior, side='i'; end     % compare to barycentric...
     ucau = lpclose(trg,b,dens,side);
     if verb>1, fprintf('\t\tnear trg \t\tfar trg\n')
@@ -182,8 +187,8 @@ for interior = [false true], interior  % ------- loop over topologies
       fprintf('\nCauchy     \t'); fprintf('%.16g\t',ucau)
       fprintf('\nQFS        \t'); fprintf('%.16g\t',uqfs)
     end
-    fprintf('\nQFS far err (vs native):\t%.3g\n',abs((uqfs(2)-ufar(2))/ufar(2)))
-    fprintf('QFS close err (vs Cauchy):\t%.3g\n',abs((uqfs(1)-ucau(1))/ucau(1)))
-    fprintf('Cau close err vs adaptive:\t%.3g\n',abs((ucau(1)-uada(1))/uada(1)))
+    fprintf('\nQFS far rel err (vs native):\t%.3g\n',abs((uqfs(2)-ufar(2))/ufar(2)))
+    fprintf('QFS close rel err (vs Cauchy):\t%.3g\n',abs((uqfs(1)-ucau(1))/ucau(1)))
+    fprintf('Cau close rel err vs adaptive:\t%.3g\n',abs((ucau(1)-uada(1))/uada(1)))
   end                   % ....
 end                                  % ---------
