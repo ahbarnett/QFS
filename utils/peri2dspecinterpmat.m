@@ -8,6 +8,13 @@ function I = peri2dspecinterpmat(Nout,Nin)
 % Uses N=prod(Nin) calls to that for now, so is O(N^2 ln N), not the best.
 % Note the ordering of the 2D arrays in the rows, or cols, of matrix I, is
 %  the natural Fortran ordering of matlab.
+%
+% Without arguments, does self-test.
+
+if nargin==0, test_peri2dspecinterpmat; return; end
+I = kron(perispecinterpmat(Nout(2),Nin(2)),perispecinterpmat(Nout(1),Nin(1)));
+
+function I = peri2dspecinterpmat_old(Nout,Nin)
 nout=prod(Nout); nin=prod(Nin);    % matrix size
 I = nan(nout,nin);
 for i=1:nin
@@ -15,6 +22,18 @@ for i=1:nin
   vout = peri2dspecinterp(reshape(v,Nin),Nout);
   I(:,i) = vout(:);
 end
-
 % timing: (acceptable)
 % tic; I = peri2dspecinterpmat([200 200],[100 100]); toc  % 10 sec on i7
+
+%%%%%%%%%%%%
+function test_peri2dspecinterpmat
+Nin = [30 50];
+Nout = [20 70];
+tic;
+I = peri2dspecinterpmat(Nout,Nin);
+toc
+tic;
+I2 = peri2dspecinterpmat_old(Nout,Nin);
+toc
+norm(I-I2,'fro')
+
