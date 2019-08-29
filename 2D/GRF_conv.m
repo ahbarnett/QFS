@@ -66,4 +66,3 @@ title(sprintf('GRF conv, int=%d, tol=%.3g',interior,tol));
 axis tight; v=axis; v(3:4)=[1e-16 1e2]; axis(v);                % cement y-range
 hold on; plot(Ns,tol+0*Ns,'b:'); text(Ns(1),1.5*tol,'QFS tol'); % horiz line
 
-

@@ -1,7 +1,7 @@
 % driver for multiple GRF conv plots, 2D case
 % Barnett 8/15/19
 clear; verb = 1;
-curvemeth = 'i';  % see GRF_conv.m
+curvemeth = 'n';  % see GRF_conv.m
 tols = 10.^[-4:-2:-14];
 figure; set(gcf,'position',[100 100 1200 900]);
 for i=1:numel(tols)
@@ -9,3 +9,6 @@ for i=1:numel(tols)
   GRF_conv(tols(i),verb,curvemeth);
   drawnow
 end
+
+% for paper, combine all onto a single plot (since the only thing that really
+% varies is the QFS on-surf plot - label each by tol).
