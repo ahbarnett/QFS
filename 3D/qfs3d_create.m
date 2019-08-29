@@ -17,6 +17,7 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %       o.verb = 0,1,... verbosity
 %       o.srctype = monopoles, or CFIE (for Helm),... [not implemented]
 %       o.factor = 's' (trunc SVD, will be v slow), 'l' (LU, 40x faster)
+%       o.surfmeth = 'd' (plain dist, needs o.param = [srcfac,dsrc,bfac,dchk])
 %
 % Outputs: QFS struct (object) q containing fields:
 %  s - QFS source surf with s.x nodes, s.w weights, and s.nx normals.
@@ -30,34 +31,50 @@ if nargin==0, test_qfs3d_create; return; end
 if nargin<6, o=[]; end
 if ~isfield(o,'verb'), o.verb = 0; end
 if ~isfield(o,'factor'), o.factor = 'l'; end
+if ~isfield(o,'surfmeth'), o.surfmeth='d'; o.param=[2.0,0.15,1.0,0.15]; end
 N = b.N; Nu=b.Nu; Nv=b.Nv;                     % nodes on input surf
 
 % report surf
 maxh1 = max(sqrt(sum(b.xu.^2,1))*(2*pi/b.Nu));
 maxh2 = max(sqrt(sum(b.xv.^2,1))*(2*pi/b.Nv));
-if o.verb, fprintf('max h = %.3g\n',max(maxh1,maxh2)); end
+maxh = max(maxh1,maxh2);
+if o.verb, fprintf('max h = %.3g\n',maxh); end
 % crude max anisotropy of surf quadr: (should be cond of [xu;xv] or sth..)
 aspects = (sqrt(sum(b.xu.^2,1))/b.Nu) ./ (sqrt(sum(b.xv.^2,1))/b.Nv);
 if o.verb, fprintf('max h ratio = %.3g\n',max([aspects,1./aspects])); end
 
 % QFS source surf
-srcfac = 1.0;        % 1.5 hack all for now
-d = -sign_from_side(interior) * 0.08; %0.06;   % hack: dist =0.13 good for torus
-s = shiftedbdry(b,d,srcfac,o);
+if o.surfmeth=='d'
+  srcfac = o.param(1);
+  ds = -sign_from_side(interior) * o.param(2);
+  s = constshiftbdry(b,ds,srcfac,o);
+  doverh = srcfac*abs(ds)/maxh;
+  if o.verb, fprintf('bfs min d/maxh ~ %.3g \t(corresp tol %.3g)\n',doverh,exp(-2*pi*doverh)); end
+else
+  % *** variable dist
+end
 s.w = ones(size(s.w));      % dummy weights
 %if o.verb, fprintf('min(s.sp)/min(b.sp)=%.3g\n',min(s.sp)/min(b.sp)); end
 % *** use for self-int test?
 
 % QFS check (collocation) surf
-dc = sign_from_side(interior) * 0.08; %0.06;   % hack
-c = shiftedbdry(b,dc,1.0,o);
+if o.surfmeth=='d'
+  dc = sign_from_side(interior) * o.param(4);
+  c = constshiftbdry(b,dc,1.0,o);
+else
+  % *** variable dist
+end
 
 % upsampled surf
-bfac = 2.0;
+if o.surfmeth=='d'
+  bfac = o.param(3);
+  doverh = bfac*abs(dc)/maxh;
+  if o.verb, fprintf('cfb min d/maxh ~ %.3g \t(corresp tol %.3g)\n',doverh,exp(-2*pi*doverh)); end
+end
 Nuf = ceil(bfac*Nu/2)*2; Nvf = ceil(bfac*Nv/2)*2;  % fine bdry, insure even
 bf = setupdoubleptr(b,[Nuf Nvf]);
 q.b = b; q.bf = bf; q.s = s; q.c = c;
-if o.verb, fprintf('QFS N=[%3d,%3d] tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=%.2f,d=%6.3f\n',Nu,Nv,tol,srcfac,d,bfac,dc); end
+if o.verb, fprintf('QFS N=[%3d,%3d] tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=%.2f,d=%6.3f\n',Nu,Nv,tol,srcfac,ds,bfac,dc); end
 
 t = tic; tic; % fill some big matrices...
 K = lpker(c,bf);       % eval at check from desired upsampled layer pot (c<-bf)
@@ -71,24 +88,24 @@ E = srcker(c,s);       % fill c<-s mat (becomes fat if src upsamp from invalid)
                        % (differs from David who keeps E N*N, then src upsamp)
 if o.verb>1, fprintf('\tfill E\t\t%.3g s\n',toc); end, tic
 % Now factor the E matrix...
-if o.factor=='s'       % trunc SVD - guaranteed  *** replace by faster sq LU?
+if o.factor=='s'       % trunc SVD - guaranteed, slow
   reps = 1e-15;        % relative eps to set rank truncation
   [U,S,V] = svd(E);
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
   q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb;  % the 2 factors
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);              % func evals coeffs from dens
-elseif o.factor=='l'   % David's preferred. Q1,Q2 gets only 1e-9, sq or rect
+elseif o.factor=='l'   % David's preferred. (Q1,Q2 gets only 1e-9, sq or rect)
   if diff(size(E))==0  % square case
     [L,U,P] = lu(E);
     if o.verb>1, fprintf('\tLU(E)\t\t%.3g s\n',toc); end
-    %q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1)
+    %q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1), not bkw stab
     q.qfsco = @(dens) U\(L\(P*(cfb*dens)));        % func evals coeffs from dens
   else                 % rect case, David's projecting to NxN
     Is = peri2dspecinterpmat([s.Nu s.Nv],[Nu Nv]);   % mat upsamples N to N_src
     if o.verb>1, fprintf('\tfill Is\t\t%.3g s\n',toc); end, tic
     [L,U,P] = lu(E*Is);
     if o.verb>1, fprintf('\tLU(E*Is)\t%.3g s\n',toc); end
-    %q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);           % Q1,Q2 *not* bkw stab: avoid
+    %q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);           % Q1,Q2, not bkw stab: avoid
     q.qfsco = @(dens) Is*(U\(L\(P*(cfb*dens))));   % func evals coeffs from dens
   end
 end
@@ -97,7 +114,7 @@ if o.verb, fprintf('QFS (N=%d) total setup %.3g s\n',N,toc(t)); end
 
 
 % ............................ helper functions .....................
-function c = shiftedbdry(b,d,fac,o)
+function c = constshiftbdry(b,d,fac,o)
 % Create quasi-parallel fac-bi-upsampled closed surf from given surf b.
 % Uses normal displacement, using analytic functions in b.
 % d = distance.
@@ -110,9 +127,8 @@ c = rmfield(c,{'Z','Zu','Zv','xu','xv','sp'});   % leaves nx (nearly right), w
 
 function qfs_show(q)                 % plot all 3D QFS geom on current fig
 b=showsurf(q.b,'k');
-o=[]; o.alpha = 1.0; s=showsurf(q.s,'r',o);
-o.alpha = 0.05; c=showsurf(q.c,'b',o);
-o.normals=0; o.alpha = 0.3; f=showsurf(q.bf,'g',o);
+o=[]; o.normals=0; o.alpha = 1.0; s=showsurf(q.s,'r',o);
+o.alpha = 0.05; c=showsurf(q.c,'b',o); o.alpha = 0.3; f=showsurf(q.bf,'g',o);
 legend([b,s,c,f],'surf','QFS source','QFS colloc','fine surf');
 lightangle(45,0);
 
@@ -140,15 +156,21 @@ s = reshape(s,sz);
 % ............................... test function ............................
 function test_qfs3d_create  % basic test at fixed N, vs plain adaptive integr
 verb = 2;
-shape = 1;                         % 0: plain torus, 1: cruller.
-a = 1.0; b = 0.5;                  % baseline torus params
-if shape==0, disp('plain torus double PTR quadr test:'), N = 1.4*[60 30];  % even
-else, disp('cruller double PTR quadr test:'),            N = 2.4*[60 30];
+shape = 2;                         % 0: plain torus, 1: cruller, 2: bent torus
+o.surfmeth = 'd';
+a = 1.0; b = 0.5;                  % baseline torus shape params
+if shape==0, disp('plain torus double PTR quadr test:'), N = 1.4*[60 30];
+  o.param = [1.0,0.15,2.0,0.15];   % surfmeth='d' settings: srcfac,ds,bfac,dc
+elseif shape==1, disp('cruller double PTR quadr test:'), N = 72*[2 1];
   b = cruller(b,0.1,5,3);          % replaces b
+  o.param = [1.0,0.08,2.0,0.08];
+else, disp('bent torus double PTR quadr test:'), N = 50*[2 1];
+  b = benttorus(b,0.3,2);          % replaces b
+  o.param = [1.0,0.15,2.0,0.15];
 end
 b = setup_torus_doubleptr(a,b,N);
 interior = false;
-for lp='D' %'SD', lp             % .... loop over layer pot types
+for lp='SD' %'SD', lp             % .... loop over layer pot types
   if lp=='S',     lpker = @Lap3dSLPmat; lpfun = @slpfun;
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end

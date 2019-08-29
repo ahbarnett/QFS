@@ -1,7 +1,9 @@
-function [Ns es cns] = GRF_conv(tol,verb,curvemeth,interior)
-% QFS convergence test for GRF, 2D, one smooth curve. Compares to sing quad.
+function [Ns es cns] = GRF3d_conv(tol,verb,surfmeth,interior)
+% QFS convergence test for GRF, 3D, one smooth surface.
 %
-% [Ns es cns] = GRF_conv(tol,verb,curvemeth,interior)
+% *** to do!
+%
+% [Ns es cns] = GRF3d_conv(tol,verb,surfmeth,interior)
 %  produces a plot in current figure, convergence of on-surface GRF.
 %
 %  tol - requested QFS tol
@@ -11,9 +13,6 @@ function [Ns es cns] = GRF_conv(tol,verb,curvemeth,interior)
 %
 % See: GRF_conv_multitol.m for example usage
 
-% todo: Helm (needs new BIE2D kernels)
-%
-% Barnett 8/15/19, 8/29/19 int case.
 
 if nargin<1, tol = 1e-10; end          % QFS (don't make too close to emach!)
 if nargin<2, verb = 0; end
