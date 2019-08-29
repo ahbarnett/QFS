@@ -29,20 +29,21 @@ function [x0,y0,segments]=selfintersect(x,y)
 % 	 etime(clock,t0)
 %    plot(x,y,'b',x0,y0,'.r');
 % 	 axis ('equal'); grid
-
+%
 %
 %    See also INTERSECTIONS.
-%
+
 %Version: 1.0, December 11, 2006
 %Tested under MATLAB 6.5.0. R13.
 %
 % (c) Antoni J. Canos.
 % ITACA. Techincal University of Valencia (Spain)
 % Email:   ancama2@dcom.upv.es
-
+%
+% edited to remove nargchk, Alex Barnett, 8/29/19
 
 % Input checks.
-error(nargchk(2,2,nargin))
+error(narginchk(2,2))
 % x and y must be vectors with same number of points (at least 4 for self-intersection).
 if sum(size(x) > 3) ~= 1 || sum(size(y) > 3) ~= 1 || ...
 		length(x) ~= length(y)
