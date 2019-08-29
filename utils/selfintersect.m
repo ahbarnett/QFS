@@ -43,7 +43,7 @@ function [x0,y0,segments]=selfintersect(x,y)
 % edited to remove nargchk, Alex Barnett, 8/29/19
 
 % Input checks.
-error(narginchk(2,2))
+narginchk(2,2)
 % x and y must be vectors with same number of points (at least 4 for self-intersection).
 if sum(size(x) > 3) ~= 1 || sum(size(y) > 3) ~= 1 || ...
 		length(x) ~= length(y)
