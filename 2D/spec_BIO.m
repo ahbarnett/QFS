@@ -21,7 +21,7 @@ k = 0;                 % wavenumber (0 for now)
 a = .3; w = 5;         % smooth wobbly radial shape params
 
 srcker = @LapSLP;                 % choose QFS src rep
-sgn = -1+2*interior;              % David convention (+1 if interior)
+sgn = sign_from_side(interior);
 
 if nargin<4
   N = ceil(40*log10(1/tol));        % N getting QFS tol for starfish
