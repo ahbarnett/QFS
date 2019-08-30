@@ -1,17 +1,13 @@
-function [Ns es cns] = GRF3d_conv(tol,verb,surfmeth,interior)
+function [Ns es cns] = GRF3d_conv(tol,verb,surfmeth,param,interior)
 % QFS convergence test for GRF, 3D, one smooth surface.
 %
-% *** to do!
-%
-% [Ns es cns] = GRF3d_conv(tol,verb,surfmeth,interior)
+% [Ns es cns] = GRF3d_conv(tol,verb,surfmeth,param,interior)
 %  produces a plot in current figure, convergence of on-surface GRF.
 %
 %  tol - requested QFS tol
 %  verb - verbosity of text output (fig always produced)
-%  curvemeth - see qfs_create
+%  surfmeth, param - passed to qfs_create
 %  interior - (boolean) whether test interior/exterior GRF
-%
-% See: GRF_conv_multitol.m for example usage
 
 
 if nargin<1, tol = 1e-10; end          % QFS (don't make too close to emach!)
