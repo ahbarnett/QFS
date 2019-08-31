@@ -1,8 +1,8 @@
 % driver for multiple GRF conv plots, 2D case, int/ext Laplace
 % Barnett 8/15/19
 clear; verb = 1;
-interior = true; %false;
-curvemeth = 'n';  % see GRF_conv.m
+interior = true;
+curvemeth = 'n';                % 'i' or 'n'; see GRF_conv.m
 tols = 10.^[-4:-2:-14];
 figure; set(gcf,'position',[100 100 1200 900]);
 for i=1:numel(tols)
@@ -25,4 +25,5 @@ end
 legend([hn hk hf hq],'native (far)','Kress (on-surf. L^2)', 'QFS (far)','QFS (on-surf. L^2)','location','north');
 title(sprintf('GRF conv, int=%d, curvemeth=%s',interior,curvemeth));  % *** edit
 xlabel('N'); ylabel('error');
-v=axis; v(1:2)=[min(Ns),max(Ns)]; axis(v);
+axis([min(Ns),max(Ns),eps,1]);
+
