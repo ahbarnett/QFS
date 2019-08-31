@@ -49,7 +49,7 @@ end
 srcker = SLP;                     % choose QFS src rep (*** fix when Helm)
 
 Ns = 100:30:600;
-es = nan(1,numel(Ns)); cns=nan*Ns;                    % save errors, etc
+es = nan(4,numel(Ns)); cns=nan*Ns;                    % save errors, etc
 for i=1:numel(Ns); N=Ns(i);       % ---------- N convergence
   b = wobblycurve(1,a,w,N);
   qs = qfs_create(b,interior,SLP,srcker,tol,o);       % make QFS objects for SLP
