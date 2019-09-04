@@ -33,7 +33,7 @@ imt0 = -log(eps)/N0;              % imag dist of src so Nystrom emach at N=N0
 sgn = -1+2*interior;              % David convention (+1 if interior)
 b = wobblycurve(1,a,w,100);       % only to access b.Z
 z0 = b.Z(t0 - 1i*sgn*imt0);       % data src pt, given imag dist, sets conv rate
-if interior, trg.x = 0.3+0.2i;    % far int target point
+if interior, trg.x = -0.1+0.2i;   % far int target point
 else trg.x = 1.5-0.5i; end        % far ext target point
 f0 = exp(1i*4.0);      % data strength to give data size O(1)
 if k==0                % Laplace
@@ -49,7 +49,7 @@ end
 srcker = SLP;                     % choose QFS src rep (*** fix when Helm)
 
 Ns = 100:30:600;
-es = nan(1,numel(Ns)); cns=nan*Ns;                    % save errors, etc
+es = nan(4,numel(Ns)); cns=nan*Ns;                    % save errors, etc
 for i=1:numel(Ns); N=Ns(i);       % ---------- N convergence
   b = wobblycurve(1,a,w,N);
   qs = qfs_create(b,interior,SLP,srcker,tol,o);       % make QFS objects for SLP

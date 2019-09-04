@@ -100,6 +100,7 @@ if o.verb>1, fprintf('\tfill E\t\t%.3g s\n',toc); end, tic
 % Now factor the E matrix...
 reps = 1e-14;        % relative eps to set rank truncation (not for LU)
 if o.factor=='s'       % trunc SVD - guaranteed, but 40x slower than LU
+  % this svd's the full E matrix - for rect case could proj to square first?
   [U,S,V] = svd(E);
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
   if o.verb>1, fprintf('\tsvd(E)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
