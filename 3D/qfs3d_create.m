@@ -196,7 +196,7 @@ else, disp('bent torus double PTR quadr test:')
   %N = 60*[2 1]; o.param = [1.0,0.2,2.0,0.2];  % demo for 'd' of LU bad 1e4 nrm
 end
 b = setup_torus_doubleptr(a,b,N);
-interior = false;
+interior = false; %true;
 for lp='SD' %'SD', lp             % .... loop over layer pot types
   if lp=='S',     lpker = @Lap3dSLPmat; lpfun = @slpfun;
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
@@ -239,15 +239,16 @@ for lp='SD' %'SD', lp             % .... loop over layer pot types
   fprintf('\nnative far rel err (vs adapt):\t%.3g\n',abs((ufar(2)-uada(2))/uada(2)))
   fprintf('QFS far rel err (vs native):\t%.3g\n',abs((uqfs(2)-ufar(2))/ufar(2)))
   fprintf('QFS close rel err (vs adapt):\t%.3g\n',abs((uqfs(1)-uada(1))/uada(1)))
-  if verb>4 && lp=='D', tic
-    Q = q.qfsco(eye(prod(N)));        % send in all poss dens: Q maps dens to co
-    fprintf('QFS get full Q mat in %.3g s\n',toc)
+  if verb>4 && lp=='D'
     B = srcker(b,q.s);                % maps QFS src to bdry vals.
-    A = B*Q;                          % the on-surf DLP eval operator
-    %svd(A) % note: for exterior case, is a single 0 eigval; interior not.
-    disp('testing GMRES conv...');  % poor since has small eigval~0 in 1/2+D.
-    [~,flag,relres,iter] = gmres(A,dens,prod(N),1e-8,1e3)
-    if verb>2, disp('computing eigvals...');
+    disp('testing GMRES conv...');  % ext:poor since has small eigval~0 in 1/2+D
+    [~,flag,relres,iter,resvec] = gmres(@(x) B*q.qfsco(x),dens,prod(N),tol,300)
+    if verb>5, tic
+      Q = q.qfsco(eye(prod(N)));    % send in all poss dens: Q maps dens to co
+      fprintf('QFS get full Q mat in %.3g s\n',toc)
+      A = B*Q;                          % the on-surf DLP eval operator
+      %svd(A) % note: for exterior case, is a single 0 eigval; interior not.
+      disp('computing eigvals...');
       lam = eig(A); figure; plot(lam,'+'); axis equal
       hold on; plot(-0.5*sign_from_side(interior),0,'r*');   % accum pt of spec?
     end
