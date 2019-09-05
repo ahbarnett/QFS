@@ -1,12 +1,13 @@
 function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
-% QFS3D_CREATE.  kernel-indep QFS setup, single torus-like double global-PTR, 3D
+% QFS3D_CREATE  kernel-indep QFS setup, torus- or sphere-like global quadr, 3D.
 %
 % q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %  sets up source and check surfaces, and dense matrices for computing
-%  QFS density from a given surface layer potential density, global double-PTR.
+%  QFS density from a given surface layer potential density, global quadr
+%  (either double-PTR for torus or rings-over-interval for sphere).
 %
 % Inputs:
-%  b = global torus-like boundary surface struct from BIE3D
+%  b = global torus-like or sphere-like boundary surface struct from BIE3D
 %  interior = false (exterior eval) or true (interior eval)
 %  lpker = density function handle, expecting interface [A An] = lpker(t,s)
 %          where t = target pointset (or surf), s = source surf,
@@ -32,7 +33,7 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %
 % With no arguments, self-test is done.
 
-% Barnett 8/21/19, based on 2D qfs_create.
+% Barnett 8/21/19, based on 2D qfs_create. Sphere topo 9/5/19
 if nargin==0, test_qfs3d_create; return; end
 if nargin<6, o=[]; end
 if ~isfield(o,'verb'), o.verb = 0; end
@@ -82,10 +83,10 @@ if o.verb, fprintf('QFS N=[%3d,%3d] tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=
 q.b = b; q.bf = bf; q.s = s; q.c = c;
 if o.verb>4, qfs_show(q); drawnow; end
 
-t = tic; tic; % fill some big matrices...
+t = tic;    % fill some big matrices...
 K = lpker(c,bf);       % eval at check from desired upsampled layer pot (c<-bf)
 if o.verb>1, fprintf('\tfill K\t\t%.3g s\n',toc); end, tic
-if [Nuf Nvf]==[Nu Nv]  % no src upsampling
+if srcfac==1.0
   cfb = K; clear K;
 else
   I = peri2dspecinterpmat([Nuf,Nvf],[Nu,Nv]);  % mat to upsample on surface
@@ -180,26 +181,32 @@ s = reshape(s,sz);
 % ............................... test function ............................
 function test_qfs3d_create  % basic test at fixed N, vs plain adaptive integr
 verb = 3;                          % 0,1,2,3,4... (& passed to qfs3d_create)
-shape = 2;                         % 0: plain torus, 1: cruller, 2: bent torus
+shape = 3;                         % 0: plain torus, 1: cruller, 2: bent torus
 o.surfmeth = 'd';
 tol = 1e-5;                        % tol used in meth 'a' etc
 a = 1.0; b = 0.5;                  % baseline torus shape params
 if shape==0, disp('plain torus double PTR quadr test:')
   N = 40*[2 1]; o.param = [1.0,0.25,1.5,0.2];  % meth='d': srcfac,ds,bfac,dc
+  b = modulatedtorus(a,b);
 elseif shape==1, disp('cruller double PTR quadr test:')
   b = cruller(b,0.1,5,3);          % replaces b
   %N = 72*[2 1]; o.param = [1.0,0.08,2.0,0.08]; % 20s; 1e-5; but nrms 1e5,1e7
   %N = 90*[2 1]; o.param = [2.0,0.04,2.0,0.07];  % low nrm (<10) but srcfac^2 extra src pts!
   %N = 90*[2 1]; o.param = [1.0,0.07,2.0,0.07]; % 1min; 1e-6,1e-5; nrms 1e4,1e5
-else, disp('bent torus double PTR quadr test:')
+  b = modulatedtorus(a,b);
+elseif shape==2, disp('bent torus double PTR quadr test:')
   b = benttorus(b,0.3,2);          % replaces b
   N = 60*[2 1]; o.param = [1.0,0.16,2.0,0.12];   % bfac needs to be 2 here to get 1e-6 in DLP
   %N = 60*[2 1]; o.param = [1.0,0.2,2.0,0.2];  % demo for 'd' of LU bad 1e4 nrm
+  b = modulatedtorus(a,b);
+elseif shape==3, disp('sphere interval x PTR test:');
+  b = ellipsoid(1,1,1);
+  N = 30*[2 1]; o.param = [1,0.3,1.5,0.3];
 end
-b = setup_torus_doubleptr(a,b,N);
+setupsurfquad(s,N);
 interior = false; %true;
 for lp='SD' %'SD', lp             % .... loop over layer pot types
-  if lp=='S',     lpker = @Lap3dSLPmat; lpfun = @slpfun;
+  if lp=='S',     lpker = @Lap3dSLPmat; lpfun = @slpfun;   % lpfun for adaptive
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end
   srcker = @Lap3dSLPmat;             % fine for Laplace

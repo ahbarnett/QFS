@@ -26,7 +26,7 @@ end
 % tic; I = peri2dspecinterpmat([200 200],[100 100]); toc  % 10 sec on i7
 
 %%%%%%%%%%%%
-function test_peri2dspecinterpmat
+function test_peri2dspecinterpmat   % compares new (kron) and old. that's it.
 Nin = [30 50];
 Nout = [20 70];
 tic;
@@ -35,5 +35,6 @@ toc
 tic;
 I2 = peri2dspecinterpmat_old(Nout,Nin);
 toc
-norm(I-I2,'fro')
+fprintf('I size %d-by-%d\n',size(I,1),size(I,2))
+norm(I-I2,'fro')    % notice this is *not* small if the symmetrizing differs!
 
