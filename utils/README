@@ -1,0 +1,6 @@
+Some of these QFS utils are taken from other packages, so should be updated:
+
+From BIE2D:
+perispecinterp.m
+
+selfintersect is a 2D polygon intersection code from MATLAB Central.

@@ -31,42 +31,40 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %  qfsco - function handle returning QFS src density coeffs from bdry density
 %          (also works for stacks of densities as cols)
 %
-% With no arguments, self-test is done.
+% With no arguments, detailed self-test is done.
 
 % Barnett 8/21/19, based on 2D qfs_create. Sphere topo 9/5/19
 if nargin==0, test_qfs3d_create; return; end
 if nargin<6, o=[]; end
 if ~isfield(o,'verb'), o.verb = 0; end
 if ~isfield(o,'factor'), o.factor = 'l'; end
-if ~isfield(o,'surfmeth'), o.surfmeth='d'; o.param=[2.0,0.15,1.0,0.15]; end
+if ~isfield(o,'surfmeth'), o.surfmeth='d'; o.param=[1.0,0.15,2.0,0.15]; end
 N = b.N; Nu=b.Nu; Nv=b.Nv;                     % nodes on input surf
 
 % get biggest inter-node spacing anywhere on original bdry
-h1 = sqrt(sum(b.xu.^2,1))*(2*pi/b.Nu);  % h_1, h_2 at all given surf nodes
-h2 = sqrt(sum(b.xv.^2,1))*(2*pi/b.Nv);
-maxh = max([h1,h2]); if o.verb, fprintf('max h = %.3g\n',maxh); end
+maxh = max(b.hmax); if o.verb, fprintf('max h = %.3g\n',maxh); end
 % crude max anisotropy of surf quadr: (should be cond of [xu;xv] or sth..)
-as = h1./h2; if o.verb, fprintf('max h ratio = %.3g\n',max([as,1./as])); end
+if o.verb, fprintf('max h ratio = %.3g\n',max(b.hmax./b.hmin)); end
 
 % QFS source surf
 srcfac = o.param(1);
 if o.surfmeth=='a'
   o.param(2) = (maxh/srcfac)/(2*pi) * log(1/tol);    % auto set src dist
 end
-ds = -sign_from_side(interior) * o.param(2);
+ds = -sign_from_side(interior) * o.param(2);         % src dist
 s = constshiftbdry(b,ds,srcfac,o);
 if o.verb
   doverh = srcfac*abs(ds)/maxh;
-  fprintf('bfs min(d/h) ~ %.3g \t(corresp tol %.2g)\n',doverh,exp(-2*pi*doverh));
-  fprintf('bfs max(d/h) ~ %.3g\n',max(ds./[h1,h2]));
+  fprintf('bfs min(d/h) ~ %.3g \t(corresp tol %.2g)\n',doverh,exp(-2*pi*doverh))
+  fprintf('bfs max(d/h) ~ %.3g \t(>5 => bad LU soln norm)\n',ds./min(s.hmin))
 end
 s.w = ones(size(s.w));      % unit src weights
 %if o.verb, fprintf('min(s.sp)/min(b.sp)=%.3g\n',min(s.sp)/min(b.sp)); end
 % *** use for self-int test?
 
 % QFS check (collocation) surf: ensure no further than ratio bound
-if o.surfmeth=='a'
-  dc = ds*(1-log(eps)/log(tol));  % opp sgn from ds, in/out ratio not David 5.7-M
+if o.surfmeth=='a'                % dc will be check surf dist...
+  dc = ds*(1-log(eps)/log(tol));  % opp sgn from ds. dc:ds ratio not David 5.7-M
   bfac = maxh*log(1/eps) / (2*pi*abs(dc));
   if bfac < 1.0, bfac=1.0; dc = sign(dc)*maxh*log(1/eps)/(2*pi); end  % decr dc
 elseif o.surfmeth=='d'
@@ -74,22 +72,20 @@ elseif o.surfmeth=='d'
 end
 c = constshiftbdry(b,dc,1.0,o);
 
-% upsampled physical surf
-Nuf = ceil(bfac*Nu/2)*2; Nvf = ceil(bfac*Nv/2)*2;  % fine bdry, insure even
-bf = setupdoubleptr(b,[Nuf Nvf]);
+bf = setupsurfquad(b,bfac*[max(Nu),Nv]);        % make upsampled physical surf
 doverh = bfac*abs(dc)/maxh;
 if o.verb, fprintf('cfb min d/maxh ~ %.3g \t(corresp tol %.2g)\n',doverh,exp(-2*pi*doverh)); end
-if o.verb, fprintf('QFS N=[%3d,%3d] tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=%.2f,d=%6.3f\n',Nu,Nv,tol,srcfac,ds,bfac,dc); end
+if o.verb, fprintf('QFS N=[%3d,%3d] tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=%.2f,d=%6.3f\n',max(Nu),Nv,tol,srcfac,ds,bfac,dc); end
 q.b = b; q.bf = bf; q.s = s; q.c = c;
 if o.verb>4, qfs_show(q); drawnow; end
 
-t = tic;    % fill some big matrices...
+t = tic; tic           % fill some big matrices...
 K = lpker(c,bf);       % eval at check from desired upsampled layer pot (c<-bf)
 if o.verb>1, fprintf('\tfill K\t\t%.3g s\n',toc); end, tic
-if srcfac==1.0
+if bfac==1.0
   cfb = K; clear K;
 else
-  I = peri2dspecinterpmat([Nuf,Nvf],[Nu,Nv]);  % mat to upsample on surface
+  I = surfinterpmat(bf,b);              % mat to upsample bf <- b
   if o.verb>1, fprintf('\tfill I\t\t%.3g s\n',toc); end, tic
   cfb = K*I;           % matrix giving check vals from original bdry dens
   if o.verb>1, fprintf('\tcfb=K*I\t\t%.3g s\n',toc); end, tic
@@ -99,13 +95,24 @@ E = srcker(c,s);       % fill c<-s mat (becomes fat if src upsamp from invalid)
                        % (differs from David who keeps E N*N, then src upsamp)
 if o.verb>1, fprintf('\tfill E\t\t%.3g s\n',toc); end, tic
 % Now factor the E matrix...
-reps = 1e-14;        % relative eps to set rank truncation (not for LU)
-if o.factor=='s'       % trunc SVD - guaranteed, but 40x slower than LU
-  % this svd's the full E matrix - for rect case could proj to square first?
-  [U,S,V] = svd(E);
-  r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
-  if o.verb>1, fprintf('\tsvd(E)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
+reps = 1e-14;          % relative eps to set rank truncation (not for LU)
+if o.factor=='s'       % trunc SVD - stablest, 20x slower than LU :(
+  squarify = 0 && (diff(size(E))~=0);            % 0,1 manual override
+  if squarify          % make svd square, proj to lowest src modes (not faster!)
+    Is = surfinterpmat(s,b);                       % mat upsamples N to N_src
+    if o.verb>1, fprintf('\tfill Is\t\t%.3g s\n',toc); end, tic
+    Es = E*Is;
+    if o.verb>1, fprintf('\tEs=E*Is\t\t%.3g s\n',toc); end, tic
+    [U,S,V] = svd(Es);
+    r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
+    if o.verb>1, fprintf('\tsvd(Es)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
+  else                 % full (poss rect) E
+    [U,S,V] = svd(E);
+    r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
+    if o.verb>1, fprintf('\tsvd(E)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
+  end
   q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb;  % the 2 factors
+  if squarify, q.Q2 = Is*q.Q2; end
   if o.verb>1, fprintf('\tQ1,Q2\t\t%.3g s\n',toc); end
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);              % func evals coeffs from dens
 elseif o.factor=='l'   % David's preferred. (Q1,Q2 gets only 1e-9, sq or rect)
@@ -115,7 +122,7 @@ elseif o.factor=='l'   % David's preferred. (Q1,Q2 gets only 1e-9, sq or rect)
     %q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1), not bkw stab
     q.qfsco = @(dens) U\(L\(P*(cfb*dens)));        % func evals coeffs from dens
   else                 % rect case, David's projecting to NxN
-    Is = peri2dspecinterpmat([s.Nu s.Nv],[Nu Nv]);   % mat upsamples N to N_src
+    Is = surfinterpmat(s,b);                       % mat upsamples N to N_src
     if o.verb>1, fprintf('\tfill Is\t\t%.3g s\n',toc); end, tic
     [L,U,P] = lu(E*Is);
     if o.verb>1, fprintf('\tLU(E*Is)\t%.3g s\n',toc); end
@@ -135,7 +142,7 @@ elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
     % *** not needed, since QR a failure.
   end
 end
-if o.verb, fprintf('QFS (N=%d) total setup %.3g s\n',N,toc(t)); end
+if o.verb, fprintf('QFS (N=%d,Ns=%d,Nf=%d) total setup %.3g s\n',N,s.N,bf.N,toc(t)); end
 
 
 
@@ -145,10 +152,12 @@ function c = constshiftbdry(b,d,fac,o)
 % Uses normal displacement, using analytic functions in b.
 % d = const distance. d>0 is in interior (convention matches 2D).
 if nargin<4, o=[]; end
-Nuf = ceil(fac*b.Nu/2)*2; Nvf = ceil(fac*b.Nv/2)*2;  % pick new Ns, insure even
-c = setupdoubleptr(b,[Nuf Nvf]);
+%o.minunodes=1;           % remove sources on little rings (default 8)
+c = setupsurfquad(b,fac*[max(b.Nu) b.Nv],o);   % note max handles both topo's
 c.x = c.x - bsxfun(@times,c.nx,d);   % use d to scale the n vectors
-c = rmfield(c,{'Z','Zu','Zv','xu','xv','sp'});   % leaves nx (nearly right), w
+%c.x = circshift(c.x,1);             % *** hack to rot sphere src only!
+c = rmfield(c,{'Z','Zu','Zv','xu','xv','sp'});   % leave old nx, w, hmin, hmax
+% Notes: latter are nearly right if d << min rad of curvature.
 
 function qfs_show(q)                 % plot all 3D QFS geom on current fig
 b=showsurf(q.b,'k');
@@ -180,11 +189,11 @@ s = reshape(s,sz);
 
 % ............................... test function ............................
 function test_qfs3d_create  % basic test at fixed N, vs plain adaptive integr
-verb = 3;                          % 0,1,2,3,4... (& passed to qfs3d_create)
-shape = 3;                         % 0: plain torus, 1: cruller, 2: bent torus
-o.surfmeth = 'd';
+verb = 4;                          % 0,1,2,3,4... (& passed to qfs3d_create)
+shape = 3;                         % 0: plain torus, 1: cruller, etc (see below)
+o.surfmeth = 'a';
 tol = 1e-5;                        % tol used in meth 'a' etc
-a = 1.0; b = 0.5;                  % baseline torus shape params
+a = 1.0; b = 0.5;                  % baseline torus-like shape params
 if shape==0, disp('plain torus double PTR quadr test:')
   N = 40*[2 1]; o.param = [1.0,0.25,1.5,0.2];  % meth='d': srcfac,ds,bfac,dc
   b = modulatedtorus(a,b);
@@ -201,38 +210,51 @@ elseif shape==2, disp('bent torus double PTR quadr test:')
   b = modulatedtorus(a,b);
 elseif shape==3, disp('sphere interval x PTR test:');
   b = ellipsoid(1,1,1);
-  N = 30*[2 1]; o.param = [1,0.3,1.5,0.3];
+  N = 40*[2 1]; o.param = [1.0,0.2,1.5,0.3];   % tried 1.5
+elseif shape==4, disp('ellipsoid interval x PTR test:');
+  b = ellipsoid(0.8,1.3,2);
+  N = 60*[2 1]; o.param = [1,0.1,3.0,0.15];
 end
-setupsurfquad(s,N);
-interior = false; %true;
+o.minunodes = 16;      % helps sphere-like poles?
+b = setupsurfquad(b,N,o);
+interior = false;
 for lp='SD' %'SD', lp             % .... loop over layer pot types
   if lp=='S',     lpker = @Lap3dSLPmat; lpfun = @slpfun;   % lpfun for adaptive
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end
-  srcker = @Lap3dSLPmat;             % fine for Laplace
-  o.verb = verb; o.factor = 'l';
+  srcker = @Lap3dSLPmat;             % either S/D fine for Laplace
+  o.verb = verb; o.factor = 's';     % SVD vs LU
   q = qfs3d_create(b,interior,lpker,srcker,tol,o);
-  densfun = @(u,v) 1+cos(u+.4)+sin(3*u - 2*v + 2 + cos(u+v+1));  % doubly-peri
-  [buu bvv] = ndgrid(b.u,b.v); dens = densfun(buu(:),bvv(:)); % dens at surf nodes
-  dists = [1e-3 1];                  % dists from bdry to test, must be row vec
+  if b.topo=='t'
+    densfun = @(u,v) 1+cos(u+.4)+sin(3*u - 2*v + 2 + cos(u+v+1));  % doubly-peri
+    vlo=0.0; vhi=2*pi;                                             % v domain
+  elseif b.topo=='s'
+    P11 = @(v) sqrt(1-v.^2);  % P_1^1 assoc Legendre, so S^2 smooth at poles...
+    densfun = @(u,v) 1 + cos(u+.4).*P11(v) + sin(3*u).*v.*P11(v).^3;  % u-peri
+    vlo=-1.0; vhi=1.0;                                             % v domain
+  end
+  dens = fun2dquadeval(densfun,b)';  % node samples of density, col vec
+  dists = [1e-6 0.7];                % dists from bdry to test, must be row vec
   u0=.1; v0=.2;    % params to base targ line on; avoid 0 for adaptive's sake
   [~,ny0] = speedfun(b,u0,v0);                                % unit normal
   trg.x = b.Z(u0,v0) - ny0*sign_from_side(interior)*dists;    % test targets
   if verb>3 && lp=='S'
-    figure; qfs_show(q); plot3(trg.x(1,:),trg.x(2,:),trg.x(3,:),'k*'); title(sprintf('int=%d',interior)); showsurffunc(b,dens); title('dens'); drawnow;
-  end
+    figure; qfs_show(q); plot3(trg.x(1,:),trg.x(2,:),trg.x(3,:),'k*');
+    title(sprintf('int=%d',interior)); showsurffunc(b,dens); title('dens');
+    drawnow; end
   ufar = lpker(trg,b) * dens;        % far field (smooth) rule
   ufar(1) = nan;                     % bad for near, ignore
   uada = 0*ufar;                     % adaptive integration of analytic func...
   warning('off','MATLAB:integral:MaxIntervalCountReached');
   for i=1:numel(uada)                % integrand = kernel * speed * dens...
     integrand = @(u,v) lpfun(b,trg.x(:,i),u,v).*speedfun(b,u,v).*densfun(u,v);
-    tic; atol = 1e-10;
-    uada(i) = integral2(integrand,0,2*pi,0,2*pi,'abstol',atol,'reltol',atol);
+    tic; atol = 1e-10;               % for 1e-12 takes several secs :(
+    uada(i) = integral2(integrand,0,2*pi,vlo,vhi,'abstol',atol,'reltol',atol);
     fprintf('adaptive integral2 for targ %d in %.3g s\n',i,toc)
-    n=100; [uu vv] = ndgrid((1:n)/n*2*pi,(1:n)/n*2*pi);
-    MAD = mean(abs(integrand(uu(:),vv(:))));
-    if verb, fprintf('\tintegrand cancellation metric (MAD/mean) %.2g\n',(2*pi)^2*MAD/uada(i)), end  % 1 if no cancellation, >1 otherwise
+    n=50; [uu vv] = ndgrid((0:n-1)/n*2*pi,vlo+(.5:n-.5)/n*(vhi-vlo));
+    MAD = mean(abs(integrand(uu(:),vv(:))));                  % crude estimate
+    if verb, fprintf('\tintegrand cancellation metric (MAD/mean) %.2g\n',...
+      (2*pi)*(vhi-vlo)*MAD/uada(i)), end  % 1 if no cancellation, >1 otherwise
   end
   tic; co = q.qfsco(dens); t=toc;    % do QFS
   if verb>2, showsurffunc(q.s,co); title('QFS co'); end
