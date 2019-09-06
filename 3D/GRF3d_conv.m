@@ -38,12 +38,12 @@ elseif shape==2, nam='bent torus';
   Nvs = 20:5:40;
 elseif shape==3, nam='sphere';
   b = ellipsoid(1,1,1);
-  trg.x = [0.3;-0.4;0.2];        % inside sphere
-  %qo.minunodes = 12;
+  %trg.x = [0.3;-0.4;0.2];        % inside sphere
+  trg.x = [0;0;0.5];        % inside sphere, axial
   Nvs = 16:8:48;
 elseif shape==4, nam='ellipsoid (aspect 2.5)';
   b = ellipsoid(.8,1.3,2);
-  trg.x = [0.3;-0.5;0.4];        % inside ellipsoid
+  trg.x = [0.3;-0.4;0.6];        % inside ellipsoid
   Nvs = 30:5:50;
 end
 if ~interior, f0 = 0.2; [z0 trg.x] = deal(trg.x,z0); end    % swap src<->trg
@@ -55,7 +55,7 @@ srcker = @Lap3dSLPmat;                     % choose QFS src rep
 sgn = sign_from_side(interior);
 es = nan(3,numel(Nvs)); cns=nan*Nvs;                  % save errors, etc
 for i=1:numel(Nvs); N=Nvs(i)*[2 1];       % --------- N convergence
-  b = setupsurfquad(b,N,qo);                          % bdry nodes
+  b = setupsurfquad(b,N);                             % bdry nodes
   o.verb = 1;
   q = qfs3d_create(b,interior,{@Lap3dSLPmat,@Lap3dDLPmat},srcker,tol,o);
   qs = q{1}; qd = q{2};                               % get QFS for {S,D}LP
