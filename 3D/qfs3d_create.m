@@ -12,13 +12,16 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %  lpker = density function handle, expecting interface [A An] = lpker(t,s)
 %          where t = target pointset (or surf), s = source surf,
 %                A = potential evaluation matrix, An = target-normal eval mat.
+%          May also be cell array of function handles, in which case returns q
+%          a cell array.
 %  srcker = QFS source function handle of same interface as lpker.
 %  tol = desired acc of eval (usused for o.surfmeth='d')
 %  o = opts struct
 %       o.verb = 0,1,... verbosity
 %       o.srctype = monopoles, or CFIE (for Helm),... [not implemented]
 %       o.factor = 's' (trunc SVD, most stable), 'l' (piv-LU, 40x faster),
-%                  'q' (attempt at trun QR, fails; or as slow as SVD for p-QR).
+%                  'q' (attempt at trun QR, fails; or as slow as SVD for p-QR),
+%                  'b' (do a backsolve with E matrix each time; slow, reliable)
 %       o.surfmeth = 'd' (given dists, needs o.param = [srcfac,dsrc,bfac,dchk])
 %                    'a' (auto-chosen dists based on maxh & tol, needs
 %                         o.param = [srcfac])
@@ -26,14 +29,16 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %                    'v' (auto-chosen variable dists based on maxh & tol, needs
 %                         o.param = [srcfac])
 %
-% Outputs: QFS struct (object) q containing fields:
+% Outputs: q = QFS struct (object), or cell array of such, containing fields:
 %  s - QFS source surf with s.x nodes, s.w weights, and s.nx normals.
 %  qfsco - function handle returning QFS src density coeffs from bdry density
 %          (also works for stacks of densities as cols)
 %
 % With no arguments, detailed self-test is done.
 
-% Barnett 8/21/19, based on 2D qfs_create. Sphere topo 9/5/19
+% Todo: make so SLP, DLP together, since only single SVD needed.
+
+% Barnett 8/21/19, based on 2D qfs_create. Sphere topo 9/5/19, multi-lp 9/6/19
 if nargin==0, test_qfs3d_create; return; end
 if nargin<6, o=[]; end
 if ~isfield(o,'verb'), o.verb = 0; end
@@ -76,28 +81,35 @@ bf = setupsurfquad(b,bfac*[max(Nu),Nv]);        % make upsampled physical surf
 doverh = bfac*abs(dc)/maxh;
 if o.verb, fprintf('cfb min d/maxh ~ %.3g \t(corresp tol %.2g)\n',doverh,exp(-2*pi*doverh)); end
 if o.verb, fprintf('QFS N=[%3d,%3d] tol=%6.3g\tsrc fac=%.2f,d=%6.3f\t  bdry fac=%.2f,d=%6.3f\n',max(Nu),Nv,tol,srcfac,ds,bfac,dc); end
-q.b = b; q.bf = bf; q.s = s; q.c = c;
-if o.verb>4, qfs_show(q); drawnow; end
+numlps = numel(lpker);
+for i=1:numlps, q{i}.b = b; q{i}.bf = bf; q{i}.s = s; q{i}.c = c; end
+if o.verb>4, qfs_show(q{1}); drawnow; end
 
-t = tic; tic           % fill some big matrices...
-K = lpker(c,bf);       % eval at check from desired upsampled layer pot (c<-bf)
-if o.verb>1, fprintf('\tfill K\t\t%.3g s\n',toc); end, tic
-if bfac==1.0
-  cfb = K; clear K;
-else
-  I = surfinterpmat(bf,b);              % mat to upsample bf <- b
+ttot = tic; tic          % fill some big matrices...
+if numlps==1, lpker = {lpker}; end      % pack so can use as cell arrays
+if bfac~=1.0             % bdry upsampling (usual case)
+  I = surfinterpmat(bf,b);              % mat to upsample bf <- b  
   if o.verb>1, fprintf('\tfill I\t\t%.3g s\n',toc); end, tic
-  cfb = K*I;           % matrix giving check vals from original bdry dens
-  if o.verb>1, fprintf('\tcfb=K*I\t\t%.3g s\n',toc); end, tic
+  for i=1:numlps
+    K = lpker{i}(c,bf);  % eval at check from desired upsampled layer pot (c<-bf)
+    if o.verb>1, fprintf('\tfill K\t\t%.3g s\n',toc); end, tic
+    cfb{i} = K*I;        % matrix giving check vals from original bdry dens
+    if o.verb>1, fprintf('\tcfb=K*I\t\t%.3g s\n',toc); end, tic
+  end
   clear K I
+else                     % no bdry upsampling
+  for i=1:numlps
+    cfb{i} = lpker{i}(c,bf);  % eval at check from desired layer pot (c<-bf)
+    if o.verb>1, fprintf('\tfill cfb\t\t%.3g s\n',toc); end, tic
+  end  
 end
 E = srcker(c,s);       % fill c<-s mat (becomes fat if src upsamp from invalid)
                        % (differs from David who keeps E N*N, then src upsamp)
 if o.verb>1, fprintf('\tfill E\t\t%.3g s\n',toc); end, tic
-% Now factor the E matrix...
+% Now factor the E matrix (apart from slow meth='b')...
 reps = 1e-14;          % relative eps to set rank truncation (not for LU)
 if o.factor=='s'       % trunc SVD - stablest, 20x slower than LU :(
-  squarify = 0 && (diff(size(E))~=0);            % 0,1 manual override
+  squarify = 0 && (diff(size(E))~=0);            % 0 manual override (since bad)
   if squarify          % make svd square, proj to lowest src modes (not faster!)
     Is = surfinterpmat(s,b);                       % mat upsamples N to N_src
     if o.verb>1, fprintf('\tfill Is\t\t%.3g s\n',toc); end, tic
@@ -111,39 +123,51 @@ if o.factor=='s'       % trunc SVD - stablest, 20x slower than LU :(
     r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
     if o.verb>1, fprintf('\tsvd(E)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
   end
-  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb;  % the 2 factors
-  if squarify, q.Q2 = Is*q.Q2; end
+  Q2 = V(:,1:r)*diag(iS); if squarify, Q2 = Is*Q2; end   % 2nd factor
+  for i=1:numlps
+    q{i}.Q1 = U(:,1:r)'*cfb{i}; q{i}.Q2 = Q2;  % 1st factor
+    q{i}.qfsco = @(dens) q{i}.Q2*(q{i}.Q1*dens);  % func evals coeffs from dens
+  end
   if o.verb>1, fprintf('\tQ1,Q2\t\t%.3g s\n',toc); end
-  q.qfsco = @(dens) q.Q2*(q.Q1*dens);              % func evals coeffs from dens
 elseif o.factor=='l'   % David's preferred. (Q1,Q2 gets only 1e-9, sq or rect)
   if diff(size(E))==0  % square case
     [L,U,P] = lu(E);
     if o.verb>1, fprintf('\tLU(E)\t\t%.3g s\n',toc); end
-    %q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1), not bkw stab
-    q.qfsco = @(dens) U\(L\(P*(cfb*dens)));        % func evals coeffs from dens
+    %q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1), not bkw stab!
+    for i=1:numlps
+      q{i}.qfsco = @(dens) U\(L\(P*(cfb{i}*dens)));  % func taking dens to co
+    end
   else                 % rect case, David's projecting to NxN
     Is = surfinterpmat(s,b);                       % mat upsamples N to N_src
     if o.verb>1, fprintf('\tfill Is\t\t%.3g s\n',toc); end, tic
     [L,U,P] = lu(E*Is);
     if o.verb>1, fprintf('\tLU(E*Is)\t%.3g s\n',toc); end
     %q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);           % Q1,Q2, not bkw stab: avoid
-    q.qfsco = @(dens) Is*(U\(L\(P*(cfb*dens))));   % func evals coeffs from dens
+    for i=1:numlps
+      q{i}.qfsco = @(dens) Is*(U\(L\(P*(cfb{i}*dens)))); % func taking dens to co
+    end
   end
 elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
   if diff(size(E))==0  % square case
-    %[Q,R,P] = qr(E);   % rank-revealing pivoted, slower than SVD!
-    [Q,R] = qr(E);     % plain QR
-    % now try a hack: truncate the plain QR, filling w/ 0s the rest
+    [Q,R,P] = qr(E);   % rank-revealing pivoted, slower than SVD!
+    %[Q,R] = qr(E);     % plain QR, pair w/ hack below...
     r = sum(abs(diag(R))>reps*abs(R(1,1))); R = R(1:r,1:r); Q = Q(:,1:r);
     if o.verb>1, fprintf('\tpQR(E)\t\t%.3g s (rank=%d)\n',toc,r); end
-    q.qfsco = @(dens) [R\(Q'*(cfb*dens));zeros(size(E,1)-r,size(dens,2))];
-    %q.qfsco = @(dens) P*(R\(Q'*(cfb*dens)));      % p-QR case
+    for i=1:numlps
+      % now try a hack: truncate the plain QR, filling w/ 0s the rest
+      %q{i}.qfsco = @(dens) [R\(Q'*(cfb{i}*dens));zeros(size(E,1)-r,size(dens,2))];
+      q{i}.qfsco = @(dens) P*(R\(Q'*(cfb{i}*dens)));      % p-QR case
+    end
   else                 % rect case, David's projecting to NxN
     % *** not needed, since QR a failure.
   end
-end
-if o.verb, fprintf('QFS (N=%d,Ns=%d,Nf=%d) total setup %.3g s\n',N,s.N,bf.N,toc(t)); end
-
+elseif o.factor=='b'  % do a backsolve each call (slow! guaranteed bkw stab)
+    for i=1:numlps
+      q{i}.qfsco = @(dens) E\(cfb{i}*dens);        % func taking dens to co
+    end
+  end
+if o.verb, fprintf('QFS (N=%d,Ns=%d,Nf=%d) total setup %.3g s\n',N,s.N,bf.N,toc(ttot)); end
+if numlps==1, q = q{1}; end                        % don't ship a cell array
 
 
 % ............................ helper functions .....................
@@ -189,10 +213,10 @@ s = reshape(s,sz);
 
 % ............................... test function ............................
 function test_qfs3d_create  % basic test at fixed N, vs plain adaptive integr
-verb = 4;                          % 0,1,2,3,4... (& passed to qfs3d_create)
+verb = 2;                          % 0,1,2,3,4... (& passed to qfs3d_create)
 shape = 3;                         % 0: plain torus, 1: cruller, etc (see below)
 o.surfmeth = 'a';
-tol = 1e-5;                        % tol used in meth 'a' etc
+tol = 1e-8;                        % tol used in meth 'a' etc
 a = 1.0; b = 0.5;                  % baseline torus-like shape params
 if shape==0, disp('plain torus double PTR quadr test:')
   N = 40*[2 1]; o.param = [1.0,0.25,1.5,0.2];  % meth='d': srcfac,ds,bfac,dc
@@ -210,12 +234,12 @@ elseif shape==2, disp('bent torus double PTR quadr test:')
   b = modulatedtorus(a,b);
 elseif shape==3, disp('sphere interval x PTR test:');
   b = ellipsoid(1,1,1);
-  N = 40*[2 1]; o.param = [1.0,0.2,1.5,0.3];   % tried 1.5
+  N = 40*[2 1]; o.param = [1.0,0.2,1.5,0.3];   % tried srcfac=1.5
 elseif shape==4, disp('ellipsoid interval x PTR test:');
   b = ellipsoid(0.8,1.3,2);
-  N = 60*[2 1]; o.param = [1,0.1,3.0,0.15];
+  N = 70*[2 1]; o.param = [1,0.17,2.0,0.17];  %surfmeth='d'
 end
-o.minunodes = 16;      % helps sphere-like poles?
+%o.minunodes = 16;      % helps sphere-like poles?
 b = setupsurfquad(b,N,o);
 interior = false;
 for lp='SD' %'SD', lp             % .... loop over layer pot types
@@ -223,14 +247,15 @@ for lp='SD' %'SD', lp             % .... loop over layer pot types
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end
   srcker = @Lap3dSLPmat;             % either S/D fine for Laplace
-  o.verb = verb; o.factor = 's';     % SVD vs LU
+  o.verb = verb; o.factor = 's';     % SVD vs LU vs direct
   q = qfs3d_create(b,interior,lpker,srcker,tol,o);
   if b.topo=='t'
     densfun = @(u,v) 1+cos(u+.4)+sin(3*u - 2*v + 2 + cos(u+v+1));  % doubly-peri
     vlo=0.0; vhi=2*pi;                                             % v domain
   elseif b.topo=='s'
     P11 = @(v) sqrt(1-v.^2);  % P_1^1 assoc Legendre, so S^2 smooth at poles...
-    densfun = @(u,v) 1 + cos(u+.4).*P11(v) + sin(3*u).*v.*P11(v).^3;  % u-peri
+    densfun = @(u,v) 1 + v + 0*sin(u).*P11(v) + sin(2*u+1).*v.*P11(v).^2;
+    % weirdly, any sin(u)*P11(v)=Y_1^1 term acts non-smooth -> DLP 3e-6 only!
     vlo=-1.0; vhi=1.0;                                             % v domain
   end
   dens = fun2dquadeval(densfun,b)';  % node samples of density, col vec
