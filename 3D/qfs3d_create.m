@@ -253,9 +253,9 @@ for lp='SD' %'SD', lp             % .... loop over layer pot types
     densfun = @(u,v) 1+cos(u+.4)+sin(3*u - 2*v + 2 + cos(u+v+1));  % doubly-peri
     vlo=0.0; vhi=2*pi;                                             % v domain
   elseif b.topo=='s'
-    P11 = @(v) sqrt(1-v.^2);  % P_1^1 assoc Legendre, so S^2 smooth at poles...
-    densfun = @(u,v) 1 + v + 0*sin(u).*P11(v) + sin(2*u+1).*v.*P11(v).^2;
-    % weirdly, any sin(u)*P11(v)=Y_1^1 term acts non-smooth -> DLP 3e-6 only!
+    sth = @(v) sqrt(1-v.^2);  % P_1^1 assoc Legendre, so S^2 smooth at poles...
+    densfun = @(u,v) 1+v-v.^2 + 0*sin(u).*sth(v) + sin(2*u+1).*v.*sth(v).^2;
+    % weirdly, any m=0 term acts as non-smooth -> DLP 3e-6 only! *** DEBUG.
     vlo=-1.0; vhi=1.0;                                             % v domain
   end
   dens = fun2dquadeval(densfun,b)';  % node samples of density, col vec

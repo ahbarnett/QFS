@@ -11,7 +11,7 @@ function [Nvs es cns] = GRF3d_conv(shape,tol,verb,interior,o)
 %  o - opts struct, passed to qfs3d_create (see its opts)
 %
 % Example:
-%  o.surfmeth='a'; o.param=1.0; o.factor='l'; GRF3d_conv(3,1e-6,2,false,o)
+%  o.surfmeth='a'; o.param=1.0; o.factor='l'; GRF3d_conv(3,1e-9,2,false,o)
 
 % Barnett 8/31/19, spheres 9/6/19
 if nargin<1, shape = 0; end
@@ -38,8 +38,8 @@ elseif shape==2, nam='bent torus';
   Nvs = 20:5:40;
 elseif shape==3, nam='sphere';
   b = ellipsoid(1,1,1);
-  %trg.x = [0.3;-0.4;0.2];        % inside sphere
-  trg.x = [0;0;0.5];        % inside sphere, axial
+  trg.x = [0.3;-0.4;0.2];        % inside sphere
+  %trg.x = [0;0;0.5];        % inside sphere, axial
   Nvs = 16:8:48;
 elseif shape==4, nam='ellipsoid (aspect 2.5)';
   b = ellipsoid(.8,1.3,2);
@@ -48,8 +48,14 @@ elseif shape==4, nam='ellipsoid (aspect 2.5)';
 end
 if ~interior, f0 = 0.2; [z0 trg.x] = deal(trg.x,z0); end    % swap src<->trg
 
-f = @(x) f0./sqrt(sum((x-z0).^2,1));               % pt src Laplace soln
-gradf = @(x) -f0*(x-z0)./sqrt(sum((x-z0).^2,1)).^3;
+if 0
+  f = @(x) f0./sqrt(sum((x-z0).^2,1));               % 1 pt src Laplace soln
+  gradf = @(x) -f0*(x-z0)./sqrt(sum((x-z0).^2,1)).^3;
+else      % 2 equal pt sources, to kill the m=1 (in fact, all m odd) terms...
+  z1 = [-z0(1);-z0(2);z0(3)];          % rot pi about z axis
+  f = @(x) f0*(1./sqrt(sum((x-z0).^2,1)) + 1./sqrt(sum((x-z1).^2,1)));
+  gradf = @(x) -f0*((x-z0)./sqrt(sum((x-z0).^2,1)).^3 + (x-z1)./sqrt(sum((x-z1).^2,1)).^3);
+end
 if verb>1, fprintf('grad f formula good? yes: %.3g\n',checkgrad(f,gradf)); end
 srcker = @Lap3dSLPmat;                     % choose QFS src rep
 sgn = sign_from_side(interior);
