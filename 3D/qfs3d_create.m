@@ -40,6 +40,10 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 
 % Todo: make so SLP, DLP together, since only single SVD needed.
 
+% Expts on factor='r': normratio for 'l' 6e4,  'r' q=0 2e3, 'r' q=1 6e2,
+% vs 's' 1e2, for the shape=2 case. Shows randURV not perfect, but close.
+% randURV q=1 is 2x faster than SVD on i7.
+
 % Barnett 8/21/19, based on 2D qfs_create. Sphere topo 9/5/19, multi-lp 9/6/19
 if nargin==0, test_qfs3d_create; return; end
 if nargin<6, o=[]; end
@@ -166,6 +170,7 @@ elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
 elseif o.factor=='r'   % randURV (learned from Gunnar), then trunc
   if diff(size(E))==0  % square case
     G = randn(size(E));
+    G = E*(E'*G);   % q=1
     [V,~] = qr(G);
     [U,R] = qr(E*V);
     r = sum(abs(diag(R))>reps*abs(R(1,1)));
@@ -228,7 +233,7 @@ s = reshape(s,sz);
 % ............................... test function ............................
 function test_qfs3d_create  % basic test at fixed N, vs plain adaptive integr
 verb = 2;                          % 0,1,2,3,4... (& passed to qfs3d_create)
-shape = 3;                         % 0: plain torus, 1: cruller, etc (see below)
+shape = 2;                         % 0: plain torus, 1: cruller, etc (see below)
 o.surfmeth = 'a';
 tol = 1e-8;                        % tol used in meth 'a' etc
 a = 1.0; b = 0.5;                  % baseline torus-like shape params
