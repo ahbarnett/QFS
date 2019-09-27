@@ -20,8 +20,10 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %       o.verb = 0,1,... verbosity
 %       o.srctype = monopoles, or CFIE (for Helm),... [not implemented]
 %       o.factor = 's' (trunc SVD, most stable), 'l' (piv-LU, 40x faster),
-%                  'q' (attempt at trun QR, fails; or as slow as SVD for p-QR),
+%                  'q' (attempt at trunc QR, fails; or as slow as SVD for p-QR),
 %                  'b' (do a backsolve with E matrix each time; slow, reliable)
+%                  'l' (LU ie Gauss elim. Unstab: large soln norm if ill-cond)
+%                  'r' (trunc rank-revealing randURV a la Martinsson review)
 %       o.surfmeth = 'd' (given dists, needs o.param = [srcfac,dsrc,bfac,dchk])
 %                    'a' (auto-chosen dists based on maxh & tol, needs
 %                         o.param = [srcfac])
@@ -161,11 +163,23 @@ elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
   else                 % rect case, David's projecting to NxN
     % *** not needed, since QR a failure.
   end
-elseif o.factor=='b'  % do a backsolve each call (slow! guaranteed bkw stab)
+elseif o.factor=='r'   % randURV (learned from Gunnar), then trunc
+  if diff(size(E))==0  % square case
+    G = randn(size(E));
+    [V,~] = qr(G);
+    [U,R] = qr(E*V);
+    r = sum(abs(diag(R))>reps*abs(R(1,1)));
+    R=R(1:r,1:r); U=U(:,1:r); V=V(:,1:r);
+    if o.verb>1, fprintf('\trandURV(E)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
     for i=1:numlps
-      q{i}.qfsco = @(dens) E\(cfb{i}*dens);        % func taking dens to co
+      q{i}.qfsco = @(dens) V*(R\(U'*(cfb{i}*dens))); % func taking dens to co
     end
   end
+elseif o.factor=='b'  % do a backsolve each call (slow! guaranteed bkw stab)
+  for i=1:numlps
+    q{i}.qfsco = @(dens) E\(cfb{i}*dens);        % func taking dens to co
+  end
+end
 if o.verb, fprintf('QFS (N=%d,Ns=%d,Nf=%d) total setup %.3g s\n',N,s.N,bf.N,toc(ttot)); end
 if numlps==1, q = q{1}; end                        % don't ship a cell array
 
@@ -247,7 +261,7 @@ for lp='SD' %'SD', lp             % .... loop over layer pot types
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end
   srcker = @Lap3dSLPmat;             % either S/D fine for Laplace
-  o.verb = verb; o.factor = 's';     % SVD vs LU vs direct
+  o.verb = verb; o.factor = 'r';     % E factor method
   q = qfs3d_create(b,interior,lpker,srcker,tol,o);
   if b.topo=='t'
     densfun = @(u,v) 1+cos(u+.4)+sin(3*u - 2*v + 2 + cos(u+v+1));  % doubly-peri
