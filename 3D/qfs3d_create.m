@@ -19,11 +19,12 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %  o = opts struct
 %       o.verb = 0,1,... verbosity
 %       o.srctype = monopoles, or CFIE (for Helm),... [not implemented]
-%       o.factor = 's' (trunc SVD, most stable), 'l' (piv-LU, 40x faster),
+%       o.factor = 's' (trunc SVD, most stable)
 %                  'q' (attempt at trunc QR, fails; or as slow as SVD for p-QR),
-%                  'b' (do a backsolve with E matrix each time; slow, reliable)
-%                  'l' (LU ie Gauss elim. Unstab: large soln norm if ill-cond)
-%                  'r' (trunc rank-revealing randURV a la Martinsson review)
+%                  'B' (do CPQR backsolve w/ E matrix each time; slow, reliable)
+%                  'b' (do a LU backsolve with E matrix each time, like 'l')
+%                  'l' (piv-LU Gauss elim. Unstab: large soln norm if ill-cond)
+%                  'r' (trunc rank-revealing randURV, a la Martinsson / Demmel)
 %       o.surfmeth = 'd' (given dists, needs o.param = [srcfac,dsrc,bfac,dchk])
 %                    'a' (auto-chosen dists based on maxh & tol, needs
 %                         o.param = [srcfac])
@@ -38,11 +39,14 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %
 % With no arguments, detailed self-test is done.
 
-% Todo: make so SLP, DLP together, since only single SVD needed.
+% Todo:
+% 1) include HQRRP and randUTV (both Gunnar) factors once have matlab interfaces
+%  randUTV claims 40x speedup over SVD at 28 cores, b=64, n=1e4
+%  (https://github.com/flame/randutv)
 
 % Expts on factor='r': normratio for 'l' 6e4,  'r' q=0 2e3, 'r' q=1 6e2,
 % vs 's' 1e2, for the shape=2 case. Shows randURV not perfect, but close.
-% randURV q=1 is 2x faster than SVD on i7.
+% randURV q=1 is 2x faster than SVD on i7, 3x on xeon.
 
 % Barnett 8/21/19, based on 2D qfs_create. Sphere topo 9/5/19, multi-lp 9/6/19
 if nargin==0, test_qfs3d_create; return; end
@@ -157,7 +161,8 @@ elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
   if diff(size(E))==0  % square case
     [Q,R,P] = qr(E);   % rank-revealing pivoted, slower than SVD!
     %[Q,R] = qr(E);     % plain QR, pair w/ hack below...
-    r = sum(abs(diag(R))>reps*abs(R(1,1))); R = R(1:r,1:r); Q = Q(:,1:r);
+    r = sum(abs(diag(R))>reps*abs(R(1,1)));
+    R = R(1:r,1:r); Q = Q(:,1:r); P = P(:,1:r);
     if o.verb>1, fprintf('\tpQR(E)\t\t%.3g s (rank=%d)\n',toc,r); end
     for i=1:numlps
       % now try a hack: truncate the plain QR, filling w/ 0s the rest
@@ -167,22 +172,27 @@ elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
   else                 % rect case, David's projecting to NxN
     % *** not needed, since QR a failure.
   end
-elseif o.factor=='r'   % randURV (learned from Gunnar), then trunc
+elseif o.factor=='r'   % randURV (from Gunnar / Demmel), then trunc solve
   if diff(size(E))==0  % square case
     G = randn(size(E));
-    G = E*(E'*G);   % q=1
+    G = E*(E'*G);   % q=1 : lowers norm in ill-cond case, rel to q=0
+    %G = E*(E'*G);   % q=2
     [V,~] = qr(G);
     [U,R] = qr(E*V);
     r = sum(abs(diag(R))>reps*abs(R(1,1)));
     R=R(1:r,1:r); U=U(:,1:r); V=V(:,1:r);
-    if o.verb>1, fprintf('\trandURV(E)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
+    if o.verb>1, fprintf('\trandURV(E)\t%.3g s (rank=%d)\n',toc,r); end, tic
     for i=1:numlps
       q{i}.qfsco = @(dens) V*(R\(U'*(cfb{i}*dens))); % func taking dens to co
     end
   end
-elseif o.factor=='b'  % do a backsolve each call (slow! guaranteed bkw stab)
+elseif o.factor=='b'  % do a backsolve each call (uses LU, not bkw stab)
   for i=1:numlps
     q{i}.qfsco = @(dens) E\(cfb{i}*dens);        % func taking dens to co
+  end
+elseif o.factor=='B'  % do a backsolve each call (slow~SVD! guaranteed bkw stab)
+  for i=1:numlps
+    q{i}.qfsco = @(dens) linsolve(E,cfb{i}*dens,struct('RECT',true));
   end
 end
 if o.verb, fprintf('QFS (N=%d,Ns=%d,Nf=%d) total setup %.3g s\n',N,s.N,bf.N,toc(ttot)); end
@@ -242,7 +252,7 @@ if shape==0, disp('plain torus double PTR quadr test:')
   b = modulatedtorus(a,b);
 elseif shape==1, disp('cruller double PTR quadr test:')
   b = cruller(b,0.1,5,3);          % replaces b
-  %N = 72*[2 1]; o.param = [1.0,0.08,2.0,0.08]; % 20s; 1e-5; but nrms 1e5,1e7
+  N = 72*[2 1]; o.param = [1.0,0.08,2.0,0.08]; % 20s; 1e-5; but nrms 1e5,1e7
   %N = 90*[2 1]; o.param = [2.0,0.04,2.0,0.07];  % low nrm (<10) but srcfac^2 extra src pts!
   %N = 90*[2 1]; o.param = [1.0,0.07,2.0,0.07]; % 1min; 1e-6,1e-5; nrms 1e4,1e5
   b = modulatedtorus(a,b);
