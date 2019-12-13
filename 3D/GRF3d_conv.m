@@ -15,7 +15,7 @@ function [Nvs es cns] = GRF3d_conv(shape,tol,verb,interior,o)
 %  o.surfmeth='d'; o.param=[1,0.12,1.5,0.27]; o.factor='b'; GRF3d_conv(4,1e-4,2,false,o)
 % o.surfmeth='d'; o.param=[1,0.1,1.5,0.2]; o.factor='b'; GRF3d_conv(0,1e-5,2,false,o)
 
-% Barnett 8/31/19, spheres 9/6/19
+% Barnett 8/31/19, spheres 9/6/19, debugged spheres 12/11/19
 if nargin<1, shape = 0; end
 if nargin<2, tol = 1e-5; end          % QFS (don't make too close to emach!)
 if nargin<3, verb = 0; end
@@ -43,7 +43,7 @@ elseif shape==3, nam='sphere';
   b = ellipsoid(1,1,1);
   trg.x = [0.3;-0.4;0.2];        % inside sphere
   %trg.x = [0;0;0.5];        % inside sphere, axial
-  Nvs = 16:8:48;
+  Nvs = 16:8:40;
 elseif shape==4, nam='ellipsoid (aspect 2.5)';
   b = ellipsoid(.8,1.3,2);
   %qo.minunodes = 20;   % ??
@@ -52,10 +52,10 @@ elseif shape==4, nam='ellipsoid (aspect 2.5)';
 end
 if ~interior, f0 = 0.2; [z0 trg.x] = deal(trg.x,z0); end    % swap src<->trg
 
-if 1         % edit : 0 if want just even m's excited, or 1 for all m's...
+if 1         % 1: default: all m-modes excited.
   f = @(x) f0./sqrt(sum((x-z0).^2,1));               % 1 pt src Laplace soln
   gradf = @(x) -f0*(x-z0)./sqrt(sum((x-z0).^2,1)).^3;
-else      % 2 equal pt sources, to kill the m=1 (in fact, all m odd) terms...
+else   % (debug) 2 equal pt sources, to kill the m=1 (in fact, all m odd) terms
   z1 = [-z0(1);-z0(2);z0(3)];          % rot pi about z axis
   f = @(x) f0*(1./sqrt(sum((x-z0).^2,1)) + 1./sqrt(sum((x-z1).^2,1)));
   gradf = @(x) -f0*((x-z0)./sqrt(sum((x-z0).^2,1)).^3 + (x-z1)./sqrt(sum((x-z1).^2,1)).^3);

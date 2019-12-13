@@ -4,6 +4,7 @@
 
 * MATLAB  
 * BIE2D or BIE3D  
+* (optionally) randUTV from libflame, specifically its MATLAB interface  
 
 ### Usage
 
@@ -13,9 +14,12 @@ Then try running some tests in the directory `2D` or `3D`.
 ### To Do
 
 * variable-dist src choice 3D  
-* analyze ellipsoid focal ellipse singularities
+* analyze ellipsoid focal ellipse singularities  
 * try theta not z vertical param for sphere-like, diagnose sin(theta) m=1
 problems  
-* bigger GRF conv (int/ext) experiments
-* 3D singularity distance and convergence rate
+* bigger GRF conv (int/ext) experiments  
+* 3D singularity distance and convergence rate  
 
+### Done
+
+* correct spectral sphere interpolation from periodic cross interval

@@ -25,6 +25,7 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %                  'b' (do a LU backsolve with E matrix each time, like 'l')
 %                  'l' (piv-LU Gauss elim. Unstab: large soln norm if ill-cond)
 %                  'r' (trunc rank-revealing randURV, a la Martinsson / Demmel)
+%                  'u' (trunc randUTV, needs matlab interface to randutv)
 %       o.surfmeth = 'd' (given dists, needs o.param = [srcfac,dsrc,bfac,dchk])
 %                    'a' (auto-chosen dists based on maxh & tol, needs
 %                         o.param = [srcfac])
@@ -40,9 +41,7 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 % With no arguments, detailed self-test is done.
 
 % Todo:
-% 1) include HQRRP and randUTV (both Gunnar) factors once have matlab interfaces
-%  randUTV claims 40x speedup over SVD at 28 cores, b=64, n=1e4
-%  (https://github.com/flame/randutv)
+% * include HQRRP factorization once have matlab interface
 
 % Expts on factor='r': normratio for 'l' 6e4,  'r' q=0 2e3, 'r' q=1 6e2,
 % vs 's' 1e2, for the shape=2 case. Shows randURV not perfect, but close.
@@ -139,7 +138,7 @@ if o.factor=='s'       % trunc SVD - stablest, 20x slower than LU :(
     q{i}.qfsco = @(dens) q{i}.Q2*(q{i}.Q1*dens);  % func evals coeffs from dens
   end
   if o.verb>1, fprintf('\tQ1,Q2\t\t%.3g s\n',toc); end
-elseif o.factor=='l'   % David's preferred. (Q1,Q2 gets only 1e-9, sq or rect)
+elseif o.factor=='l'   % LU, David's pref. (Q1,Q2 gets only 1e-9, sq or rect)
   if diff(size(E))==0  % square case
     [L,U,P] = lu(E);
     if o.verb>1, fprintf('\tLU(E)\t\t%.3g s\n',toc); end
@@ -147,7 +146,7 @@ elseif o.factor=='l'   % David's preferred. (Q1,Q2 gets only 1e-9, sq or rect)
     for i=1:numlps
       q{i}.qfsco = @(dens) U\(L\(P*(cfb{i}*dens)));  % func taking dens to co
     end
-  else                 % rect case, David's projecting to NxN
+  else                 % rect case, David's projecting to NxN then LU
     Is = surfinterpmat(s,b);                       % mat upsamples N to N_src
     if o.verb>1, fprintf('\tfill Is\t\t%.3g s\n',toc); end, tic
     [L,U,P] = lu(E*Is);
@@ -185,6 +184,14 @@ elseif o.factor=='r'   % randURV (from Gunnar / Demmel), then trunc solve
     for i=1:numlps
       q{i}.qfsco = @(dens) V*(R\(U'*(cfb{i}*dens))); % func taking dens to co
     end
+  end
+elseif o.factor=='u'   % randUTV, then trunc solve. Real E only (no Helmholtz)
+  [U,T,V] = randutv(E);
+  r = sum(abs(diag(T))>reps*abs(T(1,1)));
+  T=T(1:r,1:r); U=U(:,1:r); V=V(:,1:r);
+  if o.verb>1, fprintf('\trandUTV(E)\t%.3g s (rank=%d)\n',toc,r); end, tic
+  for i=1:numlps
+    q{i}.qfsco = @(dens) V*(T\(U'*(cfb{i}*dens))); % func taking dens to co
   end
 elseif o.factor=='b'  % do a backsolve each call (uses LU, not bkw stab)
   for i=1:numlps
@@ -240,10 +247,11 @@ sz = size(u); u = u(:)'; v = v(:)';   % we can handle row-vectorization
 s = (1/4/pi)*sum((x-b.Z(u,v)).*ny,1) ./ sqrt(sum((x-b.Z(u,v)).^2,1)).^3;
 s = reshape(s,sz);
 
+
 % ............................... test function ............................
 function test_qfs3d_create  % basic test at fixed N, vs plain adaptive integr
 verb = 2;                          % 0,1,2,3,4... (& passed to qfs3d_create)
-shape = 2;                         % 0: plain torus, 1: cruller, etc (see below)
+shape = 3;                         % 0: plain torus, 1: cruller, etc (see below)
 o.surfmeth = 'a';
 tol = 1e-8;                        % tol used in meth 'a' etc
 a = 1.0; b = 0.5;                  % baseline torus-like shape params
@@ -276,15 +284,16 @@ for lp='SD' %'SD', lp             % .... loop over layer pot types
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end
   srcker = @Lap3dSLPmat;             % either S/D fine for Laplace
-  o.verb = verb; o.factor = 'r';     % E factor method
+  o.verb = verb; o.factor = 'u';     % E factor method
   q = qfs3d_create(b,interior,lpker,srcker,tol,o);
   if b.topo=='t'
     densfun = @(u,v) 1+cos(u+.4)+sin(3*u - 2*v + 2 + cos(u+v+1));  % doubly-peri
     vlo=0.0; vhi=2*pi;                                             % v domain
   elseif b.topo=='s'
-    sth = @(v) sqrt(1-v.^2);  % P_1^1 assoc Legendre, so S^2 smooth at poles...
-    densfun = @(u,v) 1+v-v.^2 + 0*sin(u).*sth(v) + sin(2*u+1).*v.*sth(v).^2;
-    % weirdly, any m=0 term acts as non-smooth -> DLP 3e-6 only! *** DEBUG.
+    %sth = @(v) sqrt(1-v.^2);  % P_1^1 assoc Legendre, so S^2 smooth at poles...
+    %densfun = @(u,v) 1+v-v.^2 + 2.0*sin(u).*sth(v) + sin(2*u+1).*v.*sth(v).^2;
+    fR3 = @(x,y,z) x.^2+y-0.5+exp(z)/2;  % smooth in R3 
+    densfun = @(u,v) fR3(cos(u).*sqrt(1-v.^2), sin(u).*sqrt(1-v.^2), v); % restrict from R3 to S2
     vlo=-1.0; vhi=1.0;                                             % v domain
   end
   dens = fun2dquadeval(densfun,b)';  % node samples of density, col vec
