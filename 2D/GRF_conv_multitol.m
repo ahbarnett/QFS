@@ -1,7 +1,7 @@
 % driver for multiple GRF conv plots, 2D case, int/ext Laplace
 % Barnett 8/15/19
-clear; verb = 1;
-interior = true;
+clear; verb = 0;
+interior = false; %true;
 curvemeth = 'n';                % 'i' or 'n'; see GRF_conv.m
 tols = 10.^[-4:-2:-14];
 figure; set(gcf,'position',[100 100 1200 900]);

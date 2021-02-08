@@ -279,7 +279,7 @@ end
 %o.minunodes = 16;      % helps sphere-like poles?
 b = setupsurfquad(b,N,o);
 interior = false;
-for lp='SD' %'SD', lp             % .... loop over layer pot types
+for lp='D' %'SD', lp             % .... loop over layer pot types
   if lp=='S',     lpker = @Lap3dSLPmat; lpfun = @slpfun;   % lpfun for adaptive
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end
