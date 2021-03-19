@@ -6,7 +6,7 @@ clear
 mu = 0.7;  % Stokes viscosity param (>0, irrelevant)
 ns = 10:1:300;                   % kill the thing
 R=1;     % bdry radius
-hscale = log(1/eps)/(2*pi)        % how many h to place away (5.7 for epsmach)
+hscale = 5.4; %log(1/eps)/(2*pi)        % how many h to place away (5.7 for epsmach)
 
 fprintf('last three sigma_j(A) for Laplace or Stokes bdry-from-src matrix:\n')
 n0 = max(ns);                     % offset within the ss array
@@ -27,14 +27,17 @@ for i=1:numel(ns), n=ns(i);       % loop over n, also controls source radius
 end
 %figure; plot(b.x,'.'); hold on; plot(s.x,'.'); axis equal tight; title('geom')
 figure;
-subplot(2,2,1); semilogy(ns,ss(1:n0,:),'k.','markersize',10);
+subplot(2,2,1); semilogy(ns,abs(ss(1:n0,:)),'k.','markersize',10);
 xlabel('n'); ylabel('\sigma_j'); title('Lap');
-subplot(2,2,2); semilogy(ns,ss(n0+1:end,:),'k.','markersize',10);
+subplot(2,2,2); semilogy(ns,abs(ss(n0+1:end,:)),'k.','markersize',10);
 xlabel('n'); ylabel('\sigma_j'); title('Sto');
 subplot(2,2,3); plot(ns,ss(1:n0,:),'k.','markersize',10);
-xlabel('n'); ylabel('\sigma_j'); title('Lap'); set(gca,'ylim',[0 1e-8]);
+xlabel('n'); ylabel('\sigma_j'); title('Lap'); set(gca,'ylim',1e-8*[-1 1]);
 subplot(2,2,4); plot(ns,ss(n0+1:end,:),'k.','markersize',10);
-xlabel('n'); ylabel('\sigma_j'); title('Sto'); set(gca,'ylim',[0 1e-8]);
+xlabel('n'); ylabel('\sigma_j'); title('Sto'); set(gca,'ylim',1e-8*[-1 1]);
 set(gcf,'GraphicsSmoothing','on')
 %print -dpng stein_sweep_singvals_QFSB.png
 %print -dpng stein_sweep_eigvals_QFSB.png
+
+% check all eigvecs w/ small eigvals around +-1e-8 are oscillatory: yes...
+%[V,D]=eig(A); figure; imagesc(real(V)); colorbar

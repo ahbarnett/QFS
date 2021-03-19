@@ -2,12 +2,12 @@
 % Barnett 8/29/19
 
 tol = 1e-10;
-curvemeth = 'n';   % 'n' slightly worse spec than 'i'
+curvemeth = '2';   % 'n' slightly worse spec than 'i'
 interior = true;
-figure;
+figure(1);
 for N=50:20:600
-  clf;
-  lam = spec_BIO(tol,[],curvemeth,N,interior);
+  figure(2); clf;
+  spec_BIO(tol,[],curvemeth,N,interior);
   title(sprintf('spec(A_{QFS}) on-surf BIO: tol=%5.3g, N=%d',tol,N))
   drawnow;
 end

@@ -1,10 +1,12 @@
 function lam = spec_BIO(tol,verb,curvemeth,N,interior,lp)
 % SPEC_BIO.  Plot spectrum of discrete 2nd-kind bdry integral op found by 2D QFS
 %
-% lam = spec_BIO(tol,verb,curvemeth,N,interior)
-%  outputs and plots spectrum of A (on-surf operator) appoximated by QFS with
+% spec_BIO(tol,verb,curvemeth,N,interior)
+%  plots spectrum of A (on-surf operator) appoximated by QFS with
 %  tolerance tol (which should be no smaller than say 1e-14), for a simple
 %  curve in 2D.
+%
+% lam = spec_BIO(tol,verb,curvemeth,N,interior) does not plot, returns eigvals
 %
 %  Args interior (true=int, false=exterior) and lp (='D', 'S') allow 4 cases:
 %    int D:  op should approximate -1/2 + D, well cond
@@ -37,6 +39,7 @@ if nargin<6, lp='D'; end
 
 k = 0;                 % wavenumber (0 for now)
 a = .3; w = 5;         % smooth wobbly radial shape params
+o.onsurf=0;            % 1=QFS-B
 
 srcker = @LapSLP;                 % choose QFS src rep
 JRsgn = 1; if lp=='S', JRsgn=-1; end  % jump rel sign
@@ -54,11 +57,15 @@ elseif lp=='S'
 end  
 Q = q.qfsco(eye(N));              % send in all poss dens: Q maps dens to co
 A = B*Q;                          % the approx on-surf JR + D or S'=D^T operator
+%A = (B*q.Q2)*q.Q1;               % alternative way
 fprintf('N=%5d: cond(A_{QFS}) = %.3g\n',N,cond(A))
 %svd(A) % note: for ext D (int S) case, is a single 0 eigval; else well cond.
 lam = eig(A);
-plot(lam,'+'); axis equal; hold on;
-plot(-0.5*sign_from_side(interior)*JRsgn,0,'r*');   % supposed accum pt of spec
-% since A = +-1/2 + D is what QFS approximates, in D case
+if nargout==0
+  plot(lam,'+'); axis equal; hold on;
+  plot(-0.5*sign_from_side(interior)*JRsgn,0,'r*');   % supposed accum pt of spec
+  % since A = +-1/2 + D is what QFS approximates, in D case
+end
+
 
 

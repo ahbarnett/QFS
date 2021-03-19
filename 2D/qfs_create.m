@@ -36,7 +36,7 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 % Notes: 1) in the self-test, adaptive for DLP sucks (can only get 1e-9 for
 %           1e-6 dist), so Cauchy scheme still useful for close testing.
 
-% Barnett 8/15/19
+% Barnett 8/15/19. ncomp for Sto 3/19/21.
 if nargin==0, test_qfs_create; return; end
 if nargin<6, o=[]; end          % defaults...
 if ~isfield(o,'verb'), o.verb = 0; end
@@ -90,11 +90,14 @@ end
 if o.verb>2, figure; qfs_show(q); axis equal tight; drawnow; end
 
 if o.onsurf            % simpler QFS-B
-  cfb = lpker(b,b);    % assumes singular on-surf eval (incl JR +- limit)
+  cfb = lpker(b,b);    % assumes singular on-surf eval (incl JR +- limit), "A"
+  ncomp = size(cfb,1)/N;        % # vector components in the kernel
   E = srcker(b,s);
 else
   K = lpker(c,bf);     % eval at check from desired upsampled layer pot (c<-bf)
-  I = perispecinterpmat(Nf,N);  % mat to upsample by bfac
+  ncomp = size(K,2)/Nf;         % # vector components in the kernel
+  I = perispecinterpmat(Nf,N);  % mat to upsample one cmpt by bfac
+  I = kron(eye(ncomp), I);      % upsample all cmpts
   cfb = K*I;           % matrix giving check vals from original bdry dens
   E = srcker(c,s);     % fill c<-s mat (becomes fat if src upsamp from invalid)
 end                    % (differs from David who keeps E N*N, then src upsamp)
@@ -108,7 +111,7 @@ if o.factor=='s'       % trunc SVD - guaranteed, but slow
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);             % func evals coeffs from dens
 elseif o.factor=='l'   % David's preferred. Q1,Q2 gets only 1e-9, sq or rect
   if diff(size(E))==0
-    Is = eye(N);       % dummy for qfsco below
+    Is = eye(N*ncomp);          % dummy for qfsco below
     [L,U,P] = lu(E); q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1)
   else                 % rect case, David's projecting to NxN
     Is = perispecinterpmat(s.N,N);     % mat to upsample from N to N_src
@@ -123,6 +126,7 @@ end
 
 if 0  % if the factors Q1,Q2 present, check they solve needed matrix lin sys:
   % when P=eye(N), is as bad as 1e-3 (SLP), or O(1) (DLP) - why?
+  % not fixed for ncomp yet
   P = perispecinterpmat(N,round(N/4)*2);   % projector tests low modes only
   fprintf('rel ||cfb P - E Q2 Q1 P||=%.3g\n',norm(cfb*P - E*(q.Q2*(q.Q1*P)))/norm(cfb*P))
 end
