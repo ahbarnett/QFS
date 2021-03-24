@@ -19,6 +19,7 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %       o.curvemeth = 'i' imaginary displ, 'n' normal displ, '2' 2nd-order displ
 %       o.srcfac = enforce source upsampling factor (hence displ imds), or auto
 %                  (default) which uses non-self intersection or speed ratios.
+%       o.chkfac = enforce check upsampling factor (QFS-D only; default 1.0).
 %       o.factor = 's' (trunc SVD), 'l' (LU), 'q' (QR; not working).
 %       o.onsurf = 0 use off-surf check pts (default), 1 use on-surf self-eval
 %                  (1 assumes lpker(s,s) on-surf self-evaluates correctly).
@@ -44,6 +45,7 @@ if ~isfield(o,'onsurf'), o.onsurf = 0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
 if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
 if ~isfield(o,'srcfac'), o.srcfac='auto'; end
+if ~isfield(o,'chkfac'), o.chkfac=1.0; end
 N = b.N;                        % nodes on input bdry
 
 % QFS source curve
@@ -74,7 +76,7 @@ else
   imd = imds*(1-log(eps)/log(tol)); % <0, use in/out ratio, not David 5.7-M
   valid = false;
   while ~valid                    % move in check curve until valid...
-    c = shiftedbdry(b,imd,1.0,o);
+    c = shiftedbdry(b,imd,o.chkfac,o);
     valid = isempty(selfintersect(real(c.x),imag(c.x)));
     if ~valid, imd = imd/1.1; end
   end
