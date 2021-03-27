@@ -51,7 +51,7 @@ if known
     f = @(z) real(fholom(z));       % use real part as known Laplace soln
   elseif pde=='H'
     f0 = 2.0;
-    f = @(z) f0*besselh(0,k*abs(z-z0));    % point source at z0
+    f = @(z) f0*besselh(0,khelm*abs(z-z0));    % point source at z0
   elseif pde=='S'
     % ***
 
@@ -64,7 +64,7 @@ end
 if interior, trg.x = -0.1+0.2i;   % BVP soln tests: far int target point
 else trg.x = 1.5-0.5i; end        % far ext target point
 nrdist = 1e-4;                    % adaptive DLP dies any closer than 1e-6, sad
-s=4.0; trg.x(2) = b.Z(s) + nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % near test pt
+s=4.0; trg.x(2) = b.Z(s) -sgn*nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % near test pt
 trg.x=trg.x(:); uex = f(trg.x);   % u_exact vals
 if o.verb>1, figure(1); clf; plot([b.x; b.x(1)],'-'); hold on; plot(z0,'r*');
   plot(trg.x, 'k+'); axis equal; end
@@ -84,7 +84,7 @@ elseif pde=='S'
 end
 srcker = lpker;    % what we claim about QFS
 
-Ns = 100:30:400;           % convergence in # Nystrom pts ..................
+Ns = 100:20:400;           % convergence in # Nystrom pts ..................
 % save stuff...
 eA = nan(numel(Ns),1); ed=eA; fd=eA; d1=[eA,eA]; eu=[d1,d1]; kA=d1; % >=1cols
 for i=1:numel(Ns); N=Ns(i);
@@ -110,13 +110,13 @@ for i=1:numel(Ns); N=Ns(i);
   dens = A\rhs; dens0=A0\rhs;          % solves (us and Kress)
   d1(i,:)=[dens0(1), dens(1)];         % dens soln vec at 1st (fixed) node
   kA(i,:) = [cond(A0), cond(A)];
-  ed(i) = norm(dens-dens0,inf);
-  % (but note this is usually high-freq, so how affects distant soln?)
-  cod = q.qfsco(dens);
-  u(i,:) = srcker(trg,q.s,cod);        % QFS eval from QFS dens
+  ed(i) = norm(dens-dens0,inf);        % could be high-freq, not relevant?
+  cod = q.qfsco(dens);                 % get QFS src coeffs
+  u(i,:) = srcker(trg,q.s,cod);        % QFS eval (all trg) from QFS dens
   u0(i,:) = lpker(trg,b,dens0);        % native eval from Kress dens0
   [~,dens0fun] = perispecinterparb(dens0,nan);   % spectral interpolant
   u0(i,2) = lpevaladapt(trg.x(2), refker, dens0fun, b, 1e-12); % adaptive (slow)
+  %real([u0(i,:), u(i,:)])
   eu(i,:) = abs([u0(i,:)-uex.',u(i,:)-uex.']);   % 4 pt errs
   fprintf('\td10=%.12g\td1=%.12g\tfd=%.3g ed=%.3g\n',d1(i,1),d1(i,2),fd(i),ed(i))
   fprintf('\teA=%.3e\tK(A0)=%.8g\tK(A)=%.8g\teu=%.3g,%.3g\n',eA(i),kA(i,1),kA(i,2),eu(i,3),eu(i,4))
