@@ -15,7 +15,7 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %  srcker = QFS source kernel function handle of same interface as lpker.
 %  tol = desired acc of eval
 %  o = options struct:
-%       o.verb = 0,1,... verbosity  (0=silent, >=3 gives plots)
+%       o.verb = 0,1,... verbosity  (0=silent, >3 gives plots)
 %       o.curvemeth = 'i' imaginary displ, 'n' normal displ, '2' 2nd-order displ
 %       o.srcfac = enforce source upsampling factor (hence displ imds), or auto
 %                  (default) which uses non-self intersection or speed ratios.
@@ -45,51 +45,57 @@ if ~isfield(o,'onsurf'), o.onsurf = 0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
 if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
 if ~isfield(o,'srcfac'), o.srcfac='auto'; end
-if ~isfield(o,'chkfac'), o.chkfac=1.0; end
 N = b.N;                        % nodes on input bdry
 
 % QFS source curve
 if strcmp(o.srcfac,'auto'), srcfac=1.0; else srcfac=o.srcfac; end
-imds = -sign_from_side(interior) * log(1/tol)/(srcfac*N);  % imag dist of src 
+imds = -sign_from_side(interior) * log(1/tol)/N;  % imag dist of src
 s = shiftedbdry(b,imds,srcfac,o);
 
 if strcmp(o.srcfac,'auto')        % tighten up QFS source curve?
   FF = 0.0;                       % David's fudge "factor" (0.37 gains 1 digit)
   if o.curvemeth=='n', FF = 0.5;  end   % since worse curves (0.5 good for ext)
-  valid = false;
+  valid = false; imdso=imds;
   while ~valid                    % move in & upsample src curve until valid...
     srcfac = (log(1/tol)+2*pi*FF)/abs(imds) / N;
     s = shiftedbdry(b,imds,srcfac,o);
     valid = isempty(selfintersect(real(s.x),imag(s.x)));
     %valid=1;   % *** force no src upsampling
-    if o.verb, fprintf('min(s.sp)/min(b.sp)=%.3g\n',min(s.sp)/min(b.sp)); end
     if o.curvemeth=='n', valid = valid & min(s.sp)>0.5*min(b.sp); end  % David's
-    if ~valid, imds = imds/1.1; end   % bring closer, from which fac will be set
+    if ~valid
+      if o.verb>2, fprintf('src: imds=%.3g, min(s.sp)/min(b.sp)=%.3g inadequate, reducing\n',imds, min(s.sp)/min(b.sp)); end
+      imds = imds/1.1;    % bring closer, from which fac will be set
+    end
   end
+  if o.verb>1 && imdso~=imds, fprintf('src: adjusted imag dist from %.3g to %.3g...\n',imdso,imds); end
 end
 q.b = b; q.s = s;  % copy out
 
 if o.onsurf
-  if o.verb, fprintf('QFS-B N=%4d tol=%6.3g\tsfac=%.2f (p=%d), d=%6.3f\n',N,tol,srcfac,s.N,imds); end
+  if o.verb, fprintf('QFS-B N=%3d tol=%5.3g\tsfac=%.2f (p=%d), d=%6.3f\n',N,tol,srcfac,s.N,imds); end
 else
   % off-surf: QFS check (collocation) curve, specify by its imag shift (imd)
   imd = imds*(1-log(eps)/log(tol)); % <0, use in/out ratio, not David 5.7-M
-  valid = false;
+  if ~isfield(o,'chkfac'), o.chkfac=1.2*srcfac; end   % default > # src
+  valid = false; imdo=imd;
   while ~valid                    % move in check curve until valid...
     c = shiftedbdry(b,imd,o.chkfac,o);
     valid = isempty(selfintersect(real(c.x),imag(c.x)));
-    if ~valid, imd = imd/1.1; end
+    if ~valid
+      if o.verb>2, fprintf('chk: imd=%.3g intersects, reducing...\n',imd); end
+      imd = imd/1.1;
+    end
   end
+  if o.verb>1 && imdo~=imd, fprintf('chk: adjusted imag dist from %.3g to %.3g...\n',imdo,imd); end
   bfac = log(1/eps)/abs(imd) / N;     % bdry c<-bf upsampling: NB emach not tol!
   if bfac<1.0, bfac=1.0; end          % since why bother
-  %bfac = 3.0*srcfac;  % old plain fixed bdry upsampling
   Nf = ceil(bfac*N/2)*2;               % fine bdry, insure even
   bf = setupquad(b,Nf);  % fine (upsampled) bdry
   q.bf=bf; q.c=c;
-  if o.verb, fprintf('QFS-D N=%4d tol=%6.3g\tsfac=%.2f (p=%d) d=%6.3f\t  bfac=%.2f,d=%6.3f\n',N,tol,srcfac,s.N,imds,bfac,imd); end
+  if o.verb, fprintf('QFS-D N=%3d tol=%5.3g\tsfac=%.2f (p=%d) d=%6.3f\t  bfac=%.2f,d=%6.3f\n',N,tol,srcfac,s.N,imds,bfac,imd); end
 end
 
-if o.verb>2, figure; qfs_show(q); axis equal tight; drawnow; end
+if o.verb>3, figure; qfs_show(q); axis equal tight; drawnow; end   % geom
 
 if o.onsurf            % simpler QFS-B
   cfb = lpker(b,b);    % assumes singular on-surf eval (incl JR +- limit), "A"

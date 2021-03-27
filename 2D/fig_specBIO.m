@@ -6,8 +6,8 @@ tol = 1e-10;        % qfs
 interior = 1; % 1     % 0=ext,1=int  (note: int Sto has nullspace)
 o.verb=1;
 o.onsurf=0;           % 1=QFS-B, 0=QFS-D
-o.srcfac = 1.3;  % 'auto'; % fix, or auto checks src curve self-int
-o.chkfac = 1.5;
+o.srcfac = 1.4;  % 'auto'; % fix, or auto checks src curve self-int
+o.chkfac = 1.6;
 o.curvemeth='2';
 pde = 'S';        % PDE: Lap or Helm or Sto
 
@@ -27,7 +27,7 @@ end
 srcker = lpker;    % what we claim about QFS
 
 fig=figure;
-Ns = 100:50:400;
+Ns = 100:50:500;
 for i=1:numel(Ns); N=Ns(i); %if N==Ns(end), o.verb=3; end
   b = wobblycurve(1,a,w,N);
   selfker = @(varargin) lpker(varargin{:}) - 0.5*sign_from_side(interior)*eye(ncomp*N);  % JR; N is always same inside qfs_create
@@ -45,7 +45,9 @@ for i=1:numel(Ns); N=Ns(i); %if N==Ns(end), o.verb=3; end
     %A(1,:) = A(1,:) + nvec'; A0(1,:) = A0(1,:) + nvec'; end  % 1s-mat fix row
     A(:,1) = A(:,1) + wnvec; A0(:,1) = A0(:,1) + wnvec; end  % 1s-mat fix col
   rhs = sin(17*real(b.x)); if ncomp==2, rhs = [rhs; cos(6*imag(b.x))]; end % fake data
-  denserr = norm(A\rhs - A0\rhs,inf);    % fake solve, difference in dens
+  x = A\rhs; x0=A0\rhs;
+  %[x(1), x0(1)]   % check dens conv: not stable for int Stokes
+  denserr = norm(x-x0,inf);    % fake solve, difference in dens
   % but note this is usually high-freq, so how affects distant soln?
   fprintf('\tAerr=%.3g\tdenserr=%.3g\tK(A)=%g\tK(A0)=%g\n',Aerr,denserr,cond(A),cond(A0))
   lam=eig(A); lam0=eig(A0);

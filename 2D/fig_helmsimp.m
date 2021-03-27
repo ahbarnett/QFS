@@ -60,7 +60,7 @@ for i=1:numel(Ns); N=Ns(i);   % ..................
   fprintf('\tnr:  Re u ada %.12g \tqfs-b %.12g\tdiff %.3g\n',real(us(i,3)), real(us(i,5)), abs(us(i,3)-us(i,5)))
   % QFS-D...
   o.onsurf=0; qd = qfs_create(b,false,lpker,srcker,tol,o);
-  A = (srcker(b,qd.s)*qd.Q2)*qd.Q1;          % *** sort this matrix out
+  A = (srcker(b,qd.s)*qd.Q2)*qd.Q1;          % BIE matrix - best way? ***
   dens = A\f;                         % solve w/ QFS-D mat
   vs(i,4) = dens(1);               % 1st node @ s=0 always (no dens interp)
   cod = qd.qfsco(dens);
