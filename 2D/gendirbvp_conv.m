@@ -1,4 +1,4 @@
-function r = gendirbvp_conv(pde,interior,known,qfs,o)
+function [r g] = gendirbvp_conv(pde,interior,known,qfs,o)
 % GENDIRBVP_CONV  test convergence of QFS on single-body Dir int/ext BVP, 3 PDEs
 %
 % gendirbvp_conv(pde,interior,known,onsurf) tests convergence, makes a figure,
@@ -16,7 +16,8 @@ function r = gendirbvp_conv(pde,interior,known,qfs,o)
 %                 etc
 %  o        - optional struct controlling tests
 %             o.verb = 0,1,2...
-%             o.Ns  ***
+%             o.Ns = list of N values to test convergence over
+%             o.grid = struct with 1d lists grid.x, grid.y to eval prod grid
 % Outputs:
 %  r        - results struct with fields... (when columns, are for the Ns vals)
 %             Ns - row of N values used
@@ -26,6 +27,12 @@ function r = gendirbvp_conv(pde,interior,known,qfs,o)
 %             fd - Fourier decay ratio at N/2 for the RHS
 %             kA - (2 cols) cond(A_Kress), cond(A_QFS)
 %             eA - max abs elementwise A_Kress - A_QFS
+%  g - (only if o.grid input), plot grid object with fields...
+%             us - u scatt or rep (using the last Ns value)
+%             ui - indident or known
+%             x  - target points as C-#s used
+%             ii - indices in std meshgrid (array) from grid.x, grid.y
+%             b - bdry pts struct
 %
 % Notes: Mashup of fig_specBIO.m and GRF_conv.m.  Barnett started 3/26/21.
 if nargin<1, test_gendirbvp_conv; return; end
@@ -34,7 +41,7 @@ if ~isfield(o,'verb'), o.verb=0; end
 
 % BVP test case setup
 a = .3; w = 5;   % smooth wobbly radial shape params
-khelm = 10.0;    % wavenumber (Helm only)
+khelm = 20.0;    % wavenumber (Helm only)
 mu=0.7;          % viscosity (Sto only)
 
 % QFS params...
@@ -61,12 +68,17 @@ if known
   elseif pde=='S'
     f = @(z) StoSLPvelker(mu,z,z0,NaN) * [0.6;0.8]; % Stokeslet at z0, strength
   end
-else              % scattering. L:linear pot, H:plane wave, S:shear flow
-  % ***
-  
-  
+else              % scattering. f gives bdry data, so is -u_inc on bdry
+  if interior, error('interior scatt not implemented!'); end
+  if pde=='L'                    % linear potential
+    ang = pi/7;
+    f = @(z) real(exp(-1i*ang)*z);
+  elseif pde=='H'                % plane wave
+    ang = pi/7;
+    f = @(z) exp(1i*khelm*real(exp(-1i*ang)*z));
+  elseif pde=='S'                % shear flow
+  end
 end
-
 
 ncomp = 1 + (pde=='S');           % # vector cmpts dep on PDE type
 if interior, trg.x = -0.1+0.2i;   % BVP soln tests: far int target point
@@ -74,8 +86,9 @@ else trg.x = 1.5-0.5i; end        % far ext target point (for int known)
 nrdist = 1e-4;                    % adaptive DLP dies any closer than 1e-6, sad
 s=4.0; trg.x(2) = b.Z(s) -sgn*nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % near test pt
 trg.x=trg.x(:); uex = cmpak(f(trg.x),ncomp);   % u_exact vals (or pack as C-#)
-if o.verb>1, figure(1); clf; plot([b.x; b.x(1)],'-'); hold on; plot(z0,'r*');
-  plot(trg.x, 'k+'); axis equal; end
+if o.verb>1, figure(1); clf; plot([b.x; b.x(1)],'-'); hold on;
+  if exist('z0','var'), plot(z0,'r*'); end
+  plot(trg.x, 'k+'); axis equal; drawnow; end
   
   
 % PDE-specific setup, the BVP data...
@@ -93,9 +106,10 @@ elseif pde=='S'
 end
 srcker = lpker;    % what we claim about QFS
 
-Ns = 100:30:500;           % convergence in # Nystrom pts ..................
+% convergence in # Nystrom pts ..................
+if isfield(o,'Ns'), Ns=o.Ns; else, Ns = 100:30:500; end
 % save stuff...
-eA = nan(numel(Ns),1); ed=eA; fd=eA; d1=[eA,eA]; eu=[d1,d1]; kA=d1; % >=1cols
+eA = nan(numel(Ns),1); ed=eA; fd=eA; d1=[eA,eA]; u=d1; u0=d1; eu=[d1,d1]; kA=d1; % >=1cols
 for i=1:numel(Ns); N=Ns(i);
   b = wobblycurve(1,a,w,N);
   selfker = @(varargin) lpker(varargin{:}) - 0.5*sign_from_side(interior)*eye(ncomp*N);  % JR for Dirichlet BVP; N inside qfs_create fixed
@@ -130,11 +144,25 @@ for i=1:numel(Ns); N=Ns(i);
   fprintf('\td10=%.12g\td1=%.12g\tfd=%.3g ed=%.3g\n',d1(i,1),d1(i,2),fd(i),ed(i))
   fprintf('\teA=%.3e\tK(A0)=%.8g\tK(A)=%.8g\teu=%.3g,%.3g\n',eA(i),kA(i,1),kA(i,2),eu(i,3),eu(i,4))
 end
+% if no exact soln known, estim err from final u0 vals...
+if ~known, uex = u0(end,:); eu = abs([u0,u] - [uex,uex]); end
 
 % pass out
 r.Ns=Ns; r.eu=eu; r.eA=eA; r.ed=ed; r.d1=d1; r.kA=kA; r.A=A; r.A0=A0; r.fd=fd;
-%%%%%%%%%%%%%%%%%%%
+r.u=u; r.u0=u0;
 
+g.b = b;
+if isfield(o,'grid')    % eval on 2D grid using last N value.......
+  if ~isfield(o.grid, 'x'), o.grid.x=linspace(-2,2,200); end
+  if ~isfield(o.grid, 'y'), o.grid.y=linspace(-1.8,1.8,160); end
+  g.grid = o.grid;
+  [xx yy]=meshgrid(o.grid.x,o.grid.y); zz = xx+1i*yy;
+  g.ii = xor(~interior, b.inside(zz));   % indices for plotting
+  tp.x = zz(g.ii); g.x=tp.x;             % ext targets for plotting
+  tic; g.us = srcker(tp,q.s,cod); toc    % slow eval u_scatt on grid (via qfs-b)
+  g.ui = -f(g.x);                        % u_inc
+end
+%%%%%%%%%%%%%%%%%
 
 function z = cmpak(v,ncomp)          % helpers:  if ncomp=2 pack pairs as C-#s
 if ncomp==1, z=v;
@@ -143,6 +171,7 @@ else, error('cmpak only for ncomp=1 or 2!');
 end
 
 function fun=interpfunfromgrid(y,ncomp)  % gives a func handle (scalar or vec)
+% this is for 1d grids, periodic only.
 if ncomp==1
   [~,fun] = perispecinterparb(y,nan);   % scalar spectral interpolant
 elseif ncomp==2
@@ -156,19 +185,40 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%
 function test_gendirbvp_conv
-pde='S';
+pde='H';
 interior=0;
-known=1;
+known=0;
 qfs.tol = 1e-12;
 %qfs.onsurf = 1;  % 1 makes QFS-B: only seems to affect ed (dens err)
 qfs.srcfac=1.2;
 o.verb = 2;
-r = gendirbvp_conv(pde,interior,known,qfs,o);  % do conv -> results struct
+o.grid = [];
+[r g] = gendirbvp_conv(pde,interior,known,qfs,o);  % do conv -> results struct
 N=r.Ns;
+
+% conv plot ........
 figure(2);clf; semilogy(N,r.eu(:,1),'b+-', N,r.eu(:,2),'b.-', N,r.eu(:,3),'k+-', N,r.eu(:,4),'k.-', N,r.fd,'g.-', N,r.ed,'ro-', N,r.kA,'--');
 legend('u0 far plain','u0 nr adap','u far QFS','u nr QFS', 'RHS Fou decay','dens err','cond A0','cond A')
 set(gca,'ylim',[1e-15 1e3])
 xlabel('n'); hline(qfs.tol)
 title(sprintf('%s: int=%d known=%d tol=%.3g',pde,interior,known,qfs.tol))
+drawnow
 %lam=eig(r.A); lam0=eig(r.A0);
 %figure; imagesc(r.A-r.A0); axis equal; colorbar
+
+% 2D image plot (using g struct out) ..............
+figure(3);clf; u0 = 2.0; colormap(jet(256));
+up = nan*g.ii; up(g.ii) = real(g.us + (1-known)*g.ui); % u or utot (or NaN)
+if pde=='L'
+  contourf(g.grid.x,g.grid.y,up,linspace(-u0,u0,20));
+elseif pde=='H'
+  surf(g.grid.x,g.grid.y,up,'alphadata',~isnan(up)); view(2); shading interp;   % NaN->white
+end
+view(2); shading interp; caxis(u0*[-1 1]); grid off;
+title(sprintf('%s: int=%d known=%d  Re utot',pde,interior,known),'interpreter','latex');
+hold on; plot([g.b.x; g.b.x(1)],'k-');
+text(0,0,1,'$\Omega$','interpreter','latex','fontsize',20);  % NB z=1 3D lift
+text(0.5,0.5,1,'$\partial\Omega$','interpreter','latex','fontsize',20);
+axis xy equal tight; v=axis;
+
+%keyboard
