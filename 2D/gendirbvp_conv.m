@@ -62,7 +62,7 @@ if known
   if pde=='L'                    % (see GRF_conv.m for fx,fy Neu data...)
     f0 = exp(1i*4.0);            % strength to give data size O(1), phase orient
     %fholom = @(z) f0./(z-z0);    % holom ext soln, with no log nor const
-    fholom = @(z) 1.0*log(z-z0);     % ext soln w/ log (net charge)
+    fholom = @(z) 1.0*log(z-z0);     % ext soln w/ log (net charge), but zero offset still
     f = @(z) real(fholom(z));    % use real part as known Laplace soln
   elseif pde=='H'
     f = @(z) 2.0 * besselh(0,khelm*abs(z-z0));    % point source at z0
@@ -80,7 +80,8 @@ else              % scattering. f gives bdry data, so is -u_inc on bdry
     ang = pi/7;
     f = @(z) exp(1i*khelm*real(exp(-1i*ang)*z));
   elseif pde=='S'                % backgnd flow
-    f = @(z) 0.6*[-real(z);imag(z)]; fpres = @(z) 0*z;  % stagnation point flow
+    %f = @(z) 0.6*[-real(z);imag(z)]; fpres = @(z) 0*z;  % stagnation point flow
+    f = @(z) [imag(z);0*z]; fpres = @(z) 0*z;  % shear flow
     %f = @(z) 0.6*[-imag(z);real(z)]; fpres = @(z) 0*z;  % pure rot flow
     %f = @(z) [imag(z).^2;0*z]; fpres = @(z) 2*mu*real(z); % leftwards Poisseuil
     if norm(applyStokesPDEs(@(z) [f(z);fpres(z)], 1.2-1.5i, mu, 1e-4))>1e-6, warning('f,fpres not a Stokes soln!'); end
@@ -111,7 +112,7 @@ elseif pde=='S'
   lpker = @(t,s,varargin) StoDLP(t,s,mu,varargin{:}) + eta*StoSLP(t,s,mu,varargin{:});  % arg list mu wrong place :(
   refker = @(varargin) StoDLPvelker(mu,varargin{:}) + eta*StoSLPvelker(mu,varargin{:});
 end
-srcker = lpker;    % what we claim about QFS
+srcker = lpker;    % what we claim about QFS: uses the same rep as BIE
 
 % convergence in # Nystrom pts ..................
 if isfield(o,'Ns'), Ns=o.Ns; else, Ns = 100:30:500; end
@@ -228,7 +229,7 @@ qfs.tol = 1e-12;
 qfs.srcfac=1.2;
 o.verb = 2;
 o.grid = [];      % tells to do grid eval
-%o.Ns = 490;
+%o.Ns = 300;
 [r g] = gendirbvp_conv(pde,interior,known,qfs,o);  % do conv -> results struct
 N=r.Ns;
 

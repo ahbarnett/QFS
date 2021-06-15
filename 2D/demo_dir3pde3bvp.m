@@ -1,5 +1,5 @@
 % demo all 3 PDEs x 3 Dirichlet BVPs: known int / known ext / scatt ext: 9 pics
-% No convergence, just an acceptable N.
+% No convergence, just an acceptable N. Driver for: gen_dirbvpconv.m
 % Barnett 6/15/21.
 clear
 qfs.tol = 1e-12;
@@ -10,11 +10,12 @@ o.grid = [];      % tells to do grid eval
 pdes = 'LHS';     % 1 char each
 figure;
 for ipde=1:3
-  pde = pdes(ipde);
+  pde = pdes(ipde); fprintf('PDE=%s: ----------\n',pde)
   qfs.srcfac=1.0; if pde=='S', qfs.srcfac = 1.2; end     % Sto bump up  
   for ibvp=1:3
     interior = (ibvp==1);
     known = (ibvp<=2);
+    fprintf('interior=%d known=%d: ....... \n',interior,known)
     
     [r g] = gendirbvp_conv(pde,interior,known,qfs,o);  % do QFS
     
