@@ -29,10 +29,11 @@ function [r g] = gendirbvp_conv(pde,interior,known,qfs,o)
 %             eA - max abs elementwise A_Kress - A_QFS
 %  g - (only if o.grid input), plot grid object with fields...
 %             us - u scatt or rep (using the last Ns value)
-%             ui - indident or known
+%             ui - incident or known
+%             press, presi - p scatt and p incident (or known), for Sto only
 %             x  - target points as C-#s used
 %             ii - indices in std meshgrid (array) from grid.x, grid.y
-%             b - bdry pts struct
+%             q - QFS struct used (for last Ns value)
 %
 % Notes: Mashup of fig_specBIO.m and GRF_conv.m.  Barnett started 3/26/21.
 if nargin<1, test_gendirbvp_conv; return; end
@@ -61,12 +62,14 @@ if known
   if pde=='L'                    % (see GRF_conv.m for fx,fy Neu data...)
     f0 = exp(1i*4.0);            % strength to give data size O(1), phase orient
     %fholom = @(z) f0./(z-z0);    % holom ext soln, with no log nor const
-    fholom = @(z) 2.0*log(z-z0);     % ext soln w/ log (net charge)
+    fholom = @(z) 1.0*log(z-z0);     % ext soln w/ log (net charge)
     f = @(z) real(fholom(z));    % use real part as known Laplace soln
   elseif pde=='H'
     f = @(z) 2.0 * besselh(0,khelm*abs(z-z0));    % point source at z0
   elseif pde=='S'
-    f = @(z) StoSLPvelker(mu,z,z0,NaN) * [0.6;0.8]; % Stokeslet at z0, strength
+    f0 = [0.6;0.8];              % source strength force vector
+    f = @(z) StoSLPvelker(mu,z,z0,NaN) * f0;     % Stokeslet at z0, strength f0
+    fpres = @(z) StoSLPpresker(mu,z,z0,NaN) * f0;
   end
 else              % scattering. f gives bdry data, so is -u_inc on bdry
   if interior, error('interior scatt not implemented!'); end
@@ -76,7 +79,11 @@ else              % scattering. f gives bdry data, so is -u_inc on bdry
   elseif pde=='H'                % plane wave
     ang = pi/7;
     f = @(z) exp(1i*khelm*real(exp(-1i*ang)*z));
-  elseif pde=='S'                % shear flow
+  elseif pde=='S'                % backgnd flow
+    f = @(z) 0.6*[-real(z);imag(z)]; fpres = @(z) 0*z;  % stagnation point flow
+    %f = @(z) 0.6*[-imag(z);real(z)]; fpres = @(z) 0*z;  % pure rot flow
+    %f = @(z) [imag(z).^2;0*z]; fpres = @(z) 2*mu*real(z); % leftwards Poisseuil
+    if norm(applyStokesPDEs(@(z) [f(z);fpres(z)], 1.2-1.5i, mu, 1e-4))>1e-6, warning('f,fpres not a Stokes soln!'); end
   end
 end
 
@@ -151,16 +158,25 @@ if ~known, uex = u0(end,:); eu = abs([u0,u] - [uex,uex]); end
 r.Ns=Ns; r.eu=eu; r.eA=eA; r.ed=ed; r.d1=d1; r.kA=kA; r.A=A; r.A0=A0; r.fd=fd;
 r.u=u; r.u0=u0;
 
-g.b = b;
+g.q = q; if known, g.z0 = z0; end
 if isfield(o,'grid')    % eval on 2D grid using last N value.......
-  if ~isfield(o.grid, 'x'), o.grid.x=linspace(-2,2,200); end
-  if ~isfield(o.grid, 'y'), o.grid.y=linspace(-1.8,1.8,160); end
+  if ~isfield(o.grid, 'x'), o.grid.x=linspace(-2,2,201); end   % quantize 0.02
+  if ~isfield(o.grid, 'y'), o.grid.y=linspace(-1.8,1.8,181); end    % "
   g.grid = o.grid;
   [xx yy]=meshgrid(o.grid.x,o.grid.y); zz = xx+1i*yy;
   g.ii = xor(~interior, b.inside(zz));   % indices for plotting
   tp.x = zz(g.ii); g.x=tp.x;             % ext targets for plotting
-  tic; g.us = srcker(tp,q.s,cod); toc    % slow eval u_scatt on grid (via qfs-b)
   g.ui = -f(g.x);                        % u_inc
+  tic;                                   % slow eval u_scatt on grid (via qfs-b)
+  if pde~='S'
+    g.us = srcker(tp,q.s,cod);
+  else
+    g.presi = -fpres(g.x);               % p_inc
+    [uD pD] = StoDLP(tp,q.s,mu,cod);     % by hand split out S+D parts of scatt
+    [uS pS] = StoSLP(tp,q.s,mu,cod);
+    g.us = uD+eta*uS; g.press = pD+eta*pS;  % (easier than func handle wrappers)
+  end
+  toc
 end
 %%%%%%%%%%%%%%%%%
 
@@ -182,17 +198,33 @@ elseif ncomp==2
 else, error('interpfunfromgrid only for ncomp=1 or 2!');
 end
 
+function rhs = applyStokesPDEs(f,x,mu,eps)   % from BIE2D/test/testStokernels
+% check if func f (returning 3 components: u_1, u_2, and p, given C-# loc x)
+% obeys mu-Stokes PDE. Outputs the RHS (3 components: f_1, f_2, and rho)
+if nargin<4, eps=1e-5; end
+up = nan(3,5);  % three rows are u1,u2,p at each of 5 stencil pts
+up(:,1) = f(x); up(:,2) = f(x-eps); up(:,3) = f(x+eps);
+up(:,4) = f(x-1i*eps); up(:,5) = f(x+1i*eps);  % do 5-pt stencil evals
+gradp = [up(3,3)-up(3,2); up(3,5)-up(3,4)]/(2*eps);
+stencil = [-4 1 1 1 1]'/eps^2;
+lapu = up(1:2,:)*stencil;
+divu = (up(1,3)-up(1,2) + up(2,5)-up(2,4))/(2*eps);
+rhs(1:2) = -mu*lapu + gradp;  % Stokes PDE pair
+rhs(3)   =  divu;
+
+
 
 %%%%%%%%%%%%%%%%%%%%%
 function test_gendirbvp_conv
-pde='H';
+pde='S';
 interior=0;
 known=0;
 qfs.tol = 1e-12;
 %qfs.onsurf = 1;  % 1 makes QFS-B: only seems to affect ed (dens err)
 qfs.srcfac=1.2;
 o.verb = 2;
-o.grid = [];
+o.grid = [];      % tells to do grid eval
+o.Ns = 490;
 [r g] = gendirbvp_conv(pde,interior,known,qfs,o);  % do conv -> results struct
 N=r.Ns;
 
@@ -207,18 +239,28 @@ drawnow
 %figure; imagesc(r.A-r.A0); axis equal; colorbar
 
 % 2D image plot (using g struct out) ..............
-figure(3);clf; u0 = 2.0; colormap(jet(256));
-up = nan*g.ii; up(g.ii) = real(g.us + (1-known)*g.ui); % u or utot (or NaN)
+figure(3);clf; colormap(jet(256)); up = nan*g.ii;  % plot vals
 if pde=='L'
+  u0 = 2.0; up(g.ii) = g.us + (1-known)*g.ui;   % u or utot (or NaN)
   contourf(g.grid.x,g.grid.y,up,linspace(-u0,u0,20));
 elseif pde=='H'
-  surf(g.grid.x,g.grid.y,up,'alphadata',~isnan(up)); view(2); shading interp;   % NaN->white
+  u0 = 2.0; up(g.ii) = g.us + (1-known)*g.ui;   % u or utot (or NaN)
+  surf(g.grid.x,g.grid.y,real(up),'alphadata',~isnan(up));   % NaN->white
+elseif pde=='S'
+  u0 = 2.0;
+  pp = nan*g.ii; pp(g.ii) = g.press + (1-known)*g.presi;   % p or ptot (or NaN)
+  contourf(g.grid.x,g.grid.y,pp,linspace(-u0,u0,20)); hold on;
+  % pack vel into C#, subsample the grid for vel arrow plot...
+  m = numel(g.x);  % how many targs, their indices in the g.x array
+  dxq = 0.1; iiq = find(abs(mod(real(g.x)+dxq/2,dxq)-dxq/2)+abs(mod(imag(g.x)+dxq/2,dxq)-dxq/2)<1e-6);
+  up = g.us(iiq)+1i*g.us(m+iiq) + (1-known)*(g.ui(iiq)+1i*g.ui(m+iiq));
+  quiver(real(g.x(iiq)),imag(g.x(iiq)), real(up),imag(up), 2.0,'k-')
 end
 view(2); shading interp; caxis(u0*[-1 1]); grid off;
-title(sprintf('%s: int=%d known=%d  Re utot',pde,interior,known),'interpreter','latex');
+title(sprintf('%s: int=%d known=%d',pde,interior,known),'interpreter','latex');
 hold on; plot([g.b.x; g.b.x(1)],'k-');
 text(0,0,1,'$\Omega$','interpreter','latex','fontsize',20);  % NB z=1 3D lift
 text(0.5,0.5,1,'$\partial\Omega$','interpreter','latex','fontsize',20);
-axis xy equal tight; v=axis;
+axis xy equal tight; axis([min(g.grid.x),max(g.grid.x),min(g.grid.y),max(g.grid.y)]);
 
 %keyboard
