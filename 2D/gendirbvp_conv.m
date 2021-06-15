@@ -149,7 +149,11 @@ for i=1:numel(Ns); N=Ns(i);
   %real([u0(i,:), u(i,:)])
   eu(i,:) = abs([u0(i,:)-uex.',u(i,:)-uex.']);   % 4 pt errs
   fprintf('\td10=%.12g\td1=%.12g\tfd=%.3g ed=%.3g\n',d1(i,1),d1(i,2),fd(i),ed(i))
-  fprintf('\teA=%.3e\tK(A0)=%.8g\tK(A)=%.8g\teu=%.3g,%.3g\n',eA(i),kA(i,1),kA(i,2),eu(i,3),eu(i,4))
+  if known   % (notes removed eA(i,1) showing matrix el diff btw Kress, QFS)
+    fprintf('\tK(A0)=%.8g\tK(A)=%.8g\teu0=%.2g,%.2g eu=%.2g,%.2g\n',kA(i,1),kA(i,2),eu(i,1),eu(i,2),eu(i,3),eu(i,4))  % Kress and QFS u errs (far,nr)
+  else
+    fprintf('\tK(A0)=%.8g\tK(A)=%.8g\t\teu=%.2g,%.2g\n',kA(i,1),kA(i,2),abs(u(i,1)-u0(i,1)),abs(u(i,2)-u0(i,2)))    % QFS errs rel to Kress (far,nr)
+  end
 end
 % if no exact soln known, estim err from final u0 vals...
 if ~known, uex = u0(end,:); eu = abs([u0,u] - [uex,uex]); end
@@ -224,7 +228,7 @@ qfs.tol = 1e-12;
 qfs.srcfac=1.2;
 o.verb = 2;
 o.grid = [];      % tells to do grid eval
-o.Ns = 490;
+%o.Ns = 490;
 [r g] = gendirbvp_conv(pde,interior,known,qfs,o);  % do conv -> results struct
 N=r.Ns;
 
@@ -258,7 +262,7 @@ elseif pde=='S'
 end
 view(2); shading interp; caxis(u0*[-1 1]); grid off;
 title(sprintf('%s: int=%d known=%d',pde,interior,known),'interpreter','latex');
-hold on; plot([g.b.x; g.b.x(1)],'k-');
+hold on; plot([g.q.b.x; g.q.b.x(1)],'k-');
 text(0,0,1,'$\Omega$','interpreter','latex','fontsize',20);  % NB z=1 3D lift
 text(0.5,0.5,1,'$\partial\Omega$','interpreter','latex','fontsize',20);
 axis xy equal tight; axis([min(g.grid.x),max(g.grid.x),min(g.grid.y),max(g.grid.y)]);
