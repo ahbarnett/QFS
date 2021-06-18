@@ -15,10 +15,12 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %  srcker = QFS source kernel function handle of same interface as lpker.
 %  tol = desired acc of eval
 %  o = options struct:
-%       o.verb = 0,1,... verbosity  (0=silent, >3 gives plots)
+%       o.verb = 0,1,... verbosity  (0=silent, >3 plots geom).
 %       o.curvemeth = 'i' imaginary displ, 'n' normal displ, '2' 2nd-order displ
-%       o.srcfac = enforce source upsampling factor (hence displ imds), or auto
-%                  (default) which uses non-self intersection or speed ratios.
+%       o.srcfac = if present, enforce (override) source upsampling factor,
+%                  else uses auto choice (default).
+%       o.srcfixd = if present enforce (override) imag displacement of src curve
+%                   (needs correct sign), otherwise uses auto-choice (default).
 %       o.chkfac = enforce check upsampling factor (QFS-D only; default 1.0).
 %       o.factor = 's' (trunc SVD), 'l' (LU), 'q' (QR; not working).
 %       o.onsurf = 0 use off-surf check pts (default), 1 use on-surf self-eval
@@ -36,6 +38,8 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %
 % Notes: 1) in the self-test, adaptive for DLP sucks (can only get 1e-9 for
 %           1e-6 dist), so Cauchy scheme still useful for close testing.
+%           For Stokes 1e-4 is closest dist :(. Manas & I made better way using
+%           stable ker evals and local interp of (x-y) and (x-y).ny, to do.
 
 % Barnett 8/15/19. ncomp for Sto 3/19/21.
 if nargin==0, test_qfs_create; return; end
@@ -47,36 +51,46 @@ if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
 if ~isfield(o,'srcfac'), o.srcfac='auto'; end
 N = b.N;                        % nodes on input bdry
 
-% QFS source curve
-if strcmp(o.srcfac,'auto'), srcfac=1.0; else srcfac=o.srcfac; end
-imds = -sign_from_side(interior) * log(1/tol)/N;  % imag dist of src
-s = shiftedbdry(b,imds,srcfac,o);
-
-if strcmp(o.srcfac,'auto')        % tighten up QFS source curve?
-  FF = 0.0;                       % David's fudge "factor" (0.37 gains 1 digit)
-  if o.curvemeth=='n', FF = 0.5;  end   % since worse curves (0.5 good for ext)
-  valid = false; imdso=imds;
-  while ~valid                    % move in & upsample src curve until valid...
-    srcfac = (log(1/tol)+2*pi*FF)/abs(imds) / N;
-    s = shiftedbdry(b,imds,srcfac,o);
-    valid = isempty(selfintersect(real(s.x),imag(s.x)));
-    %valid=1;   % *** force no src upsampling
-    if o.curvemeth=='n', valid = valid & min(s.sp)>0.5*min(b.sp); end  % David's
-    if ~valid
-      if o.verb>2, fprintf('src: imds=%.3g, min(s.sp)/min(b.sp)=%.3g inadequate, reducing\n',imds, min(s.sp)/min(b.sp)); end
-      imds = imds/1.1;    % bring closer, from which fac will be set
+% QFS source curv choice, then p (# src)...
+tola = tol;                               % method-adjusted tol
+if o.curvemeth=='n', tola = tol/20; end   % equiv David's FF fudge fac
+if ~isfield(o,'srcfixd')    % auto-choose source curve displ imds
+  srcsgn = -sign_from_side(interior);
+  imds = srcsgn * log(1/tola)/N;          % imag displ of src, if N   *** try p
+  imdbig = 2.0*imds;
+  if intersectfun(b,imdbig,o)==-1       % then |d| > |d_int|/2, maybe not safe
+    if ~interior, dmin = 0; dmax = imdbig; else, dmin = imdbig; dmax = 0; end
+    tol = 1e-3;                    % enough for src loc
+    [imdint, nsteps] = bisect(@(d) intersectfun(b,d,o), dmin, dmax, tol);
+    badimdfrac = 1.0;               % must be >0.5 due to defn of imdbig above
+    imdbad = badimdfrac*imdint;             % borderline bad imag displ
+    if abs(imds)>abs(imdbad)
+      if o.verb, fprintf('src: changing imag displ from near-self-int %.3g to %.3g...\n',imds,imdbad); end
+      imds = imdbad;
     end
   end
-  if o.verb>1 && imdso~=imds, fprintf('src: adjusted imag dist from %.3g to %.3g...\n',imdso,imds); end
+else
+  imds = o.srcfixd;           % user has to override w/ correct sign too :)
+  if o.verb && intersectfun(b,imds,o)==-1, fprintf('o.srcfixd=%.3g self-intersects!\n',imds); end
 end
-q.b = b; q.s = s;  % copy out
+ptol = abs(1/imds)*log(1/tola);        % criterion for # src to get adj tol
+if strcmp(o.srcfac,'auto')             % then decide p, # srcs...
+  srcfac = max(1.0, ptol/N);           % never have p<N
+else
+  srcfac=o.srcfac;                     % override
+  if o.verb && N*srcfac<0.95*ptol      % here 0.95 fudge factor avoids many msgs
+    fprintf('o.srcfac=%.3g override not enough for adj tol %.3g at imds=%.3g! (pred err=%.3g)\n',srcfac, tola, imds, exp(-srcfac*N*abs(imds)));
+  end
+end
+s = shiftedbdry(b,imds,srcfac,o);      % make src curve (2 params: imds, srcfac)
+q.b = b; q.s = s;                      % copy out
 
 if o.onsurf
   if o.verb, fprintf('QFS-B N=%3d tol=%5.3g\tsfac=%.2f (p=%d), d=%6.3f\n',N,tol,srcfac,s.N,imds); end
 else
   % off-surf: QFS check (collocation) curve, specify by its imag shift (imd)
   imd = imds*(1-log(eps)/log(tol)); % <0, use in/out ratio, not David 5.7-M
-  if ~isfield(o,'chkfac'), o.chkfac=1.2*srcfac; end   % default > # src
+  if ~isfield(o,'chkfac'), o.chkfac=1.1*srcfac; end   % default > # src
   valid = false; imdo=imd;
   while ~valid                    % move in check curve until valid...
     c = shiftedbdry(b,imd,o.chkfac,o);
@@ -115,10 +129,11 @@ if o.factor=='s'       % trunc SVD - guaranteed, but slow
   reps = 1e-15;        % relative eps to set rank truncation
   [U,S,V] = svd(E);
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
+  if o.verb>2, fprintf('o.factor=s: E is %dx%d, r=%d\n',size(E,1),size(E,2),r); end
   q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);             % func evals coeffs from dens
 elseif o.factor=='l'   % David's preferred. Q1,Q2 gets only 1e-9, sq or rect
-  if diff(size(E))==0
+  if diff(size(E))==0           % square case
     Is = eye(N*ncomp);          % dummy for qfsco below
     [L,U,P] = lu(E); q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1)
   else                 % rect case, David's projecting to NxN
@@ -169,6 +184,10 @@ elseif o.curvemeth=='i'              % imag shift, needs analytic curve defn
 end
 c = setupquad(c,Nf);
 
+function selfint = intersectfun(b,d,o)   % -1 if bdry b self-int, +1 if not
+s = shiftedbdry(b,d,1.0,o);
+selfint = -1 + 2*isempty(selfintersect(real(s.x),imag(s.x)));
+
 function qfs_show(q)                 % plot all QFS geom on current fig
 b=showcurve(q.b,'k'); s=showcurve(q.s,'r');
 if isfield(q,'c'), c=showcurve(q.c,'b'); f=plot(q.bf.x,'g.');  % off-surf
@@ -190,7 +209,7 @@ a = .3; w = 5;         % smooth wobbly radial shape params
 tol = 1e-12;   % 1e-12 N=380;   1e-16 N=180;
 N = 380; b = wobblycurve(1,a,w,N);  % really N here needs to grow as log(1/tol)
 o.srcfac = 1.0;                     % enforce upsampling
-figure(10); clf; h = showcurve(b); hold on; interior=false;
+figure(10); clf; h = showcurve(b); hold on; interior=true;
 meths='n2i'; cols = 'bgr';
 for i=1:3, o.curvemeth=meths(i); o.verb = 1;
   q = qfs_create(b,interior,@LapSLP,@LapSLP,tol,o);
@@ -199,10 +218,11 @@ end
 axis equal tight; legend(h,'bdry','n','2','i');
 
 verb = 1; o.verb = verb; o.curvemeth = '2';      % 'n' int=1 poor, why?
-o.onsurf = 0;
+o.onsurf = 1;      % default 0
 srcker = @LapSLP;  % fine for Laplace; will need CFIE for Helmholtz
 
 for interior = [false true], interior  % ------- loop over topologies
+  %o.srcfixd = -0.1*sign_from_side(interior);   % test the override
   bny = @(t) b.Zp(t)./(1i*abs(b.Zp(t)));  % unit bdry normal func
   for lp = 'SD', lp          % .... loop over layer pot types
     if lp=='S'

@@ -35,7 +35,7 @@ function [r g] = gendirbvp_conv(pde,interior,known,qfs,o)
 %             ii - indices in std meshgrid (array) from grid.x, grid.y
 %             q - QFS struct used (for last Ns value)
 %
-% Notes: Mashup of fig_specBIO.m and GRF_conv.m.  Barnett started 3/26/21.
+% Notes: Mashup of fig_specBIO.m and GRF_conv.m.  Barnett 3/26/21, 6/15/21.
 if nargin<1, test_gendirbvp_conv; return; end
 if nargin<5, o=[]; end
 if ~isfield(o,'verb'), o.verb=0; end
@@ -50,7 +50,7 @@ if nargin<4, qfs=[]; end
 qfs.verb = o.verb;
 if ~isfield(qfs,'tol'), qfs.tol = 1e-10; end
 if ~isfield(qfs,'onsurf'), qfs.onsurf = 0; end
-if ~isfield(qfs,'curvemeth'), qfs.curvemeth = '2'; end
+if ~isfield(qfs,'curvemeth'), qfs.curvemeth = '2'; end    % 2nd-ord displ pts
 
 % BVP data we use
 b = wobblycurve(1,a,w,100);    % only to access b.Z
@@ -98,7 +98,7 @@ if o.verb>1, figure(1); clf; plot([b.x; b.x(1)],'-'); hold on;
   if exist('z0','var'), plot(z0,'r*'); end
   plot(trg.x, 'k+'); axis equal; drawnow; end
   
-  
+
 % PDE-specific setup, the BVP data...
 eta = 0.0 + ~interior;      % eta = amount of S mix:  ext D+S, int D alone
 if pde=='L'
@@ -115,7 +115,7 @@ end
 srcker = lpker;    % what we claim about QFS: uses the same rep as BIE
 
 % convergence in # Nystrom pts ..................
-if isfield(o,'Ns'), Ns=o.Ns; else, Ns = 100:30:500; end
+if isfield(o,'Ns'), Ns=o.Ns; else, Ns = 70:30:500; end
 % save stuff...
 eA = nan(numel(Ns),1); ed=eA; fd=eA; d1=[eA,eA]; u=d1; u0=d1; eu=[d1,d1]; kA=d1; % >=1cols
 for i=1:numel(Ns); N=Ns(i);
@@ -139,6 +139,7 @@ for i=1:numel(Ns); N=Ns(i);
   rhs = f(b.x);                        % Dirichlet data
   fhat=fft(rhs(1:N)); fd(i)=abs(fhat(N/2+1)/max(fhat));  % RHS_1 Fou n/2 decay
   dens = A\rhs; dens0=A0\rhs;          % solves (us and Kress)
+  %[svd(A), svd(A0)]
   d1(i,:)=[dens0(1), dens(1)];         % dens soln at 1st (fixed) node, 1st cmpt
   kA(i,:) = [cond(A0), cond(A)];
   ed(i) = norm(dens-dens0,inf);        % could be high-freq, not relevant?
@@ -221,15 +222,17 @@ rhs(3)   =  divu;
 
 %%%%%%%%%%%%%%%%%%%%%
 function test_gendirbvp_conv
-pde='S';
+pde='L';
 interior=0;
-known=0;
+known=1;
 qfs.tol = 1e-12;
-%qfs.onsurf = 1;  % 1 makes QFS-B: only seems to affect ed (dens err)
-qfs.srcfac=1.2;
+qfs.onsurf = 1;  % 1 makes QFS-B: only seems to affect ed (dens err)
+qfs.srcfix=true;
+%qfs.srcfac = 1.05;   % 1.2 for Sto, 1.0 for others
+%qfs.chkfac = 1.0*qfs.srcfac;  % 1.1 for Sto
 o.verb = 2;
 o.grid = [];      % tells to do grid eval
-%o.Ns = 300;
+%o.Ns = 400;
 [r g] = gendirbvp_conv(pde,interior,known,qfs,o);  % do conv -> results struct
 N=r.Ns;
 
@@ -243,7 +246,7 @@ drawnow
 %lam=eig(r.A); lam0=eig(r.A0);
 %figure; imagesc(r.A-r.A0); axis equal; colorbar
 
-% 2D image plot (using g struct out) ..............
+if isfield(o,'grid')  % ...... 2D image plot (using g struct out) ..............
 figure(3);clf; colormap(jet(256)); up = nan*g.ii;  % plot vals
 if pde=='L'
   u0 = 2.0; up(g.ii) = g.us + (1-known)*g.ui;   % u or utot (or NaN)
@@ -267,5 +270,6 @@ hold on; plot([g.q.b.x; g.q.b.x(1)],'k-');
 text(0,0,1,'$\Omega$','interpreter','latex','fontsize',20);  % NB z=1 3D lift
 text(0.5,0.5,1,'$\partial\Omega$','interpreter','latex','fontsize',20);
 axis xy equal tight; axis([min(g.grid.x),max(g.grid.x),min(g.grid.y),max(g.grid.y)]);
+end
 
 %keyboard

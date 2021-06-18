@@ -2,12 +2,12 @@
 % Barnett 3/19/21
 clear
 a = .3; w = 5;         % smooth wobbly radial shape params
-tol = 1e-10;        % qfs
-interior = 1; % 1     % 0=ext,1=int  (note: int Sto has nullspace)
+tol = 1e-12;        % qfs
+interior = 1;     % 0=ext,1=int  (note: int Sto has nullspace)
 o.verb=1;
 o.onsurf=0;           % 1=QFS-B, 0=QFS-D
-o.srcfac = 1.4;  % 'auto'; % fix, or auto checks src curve self-int
-o.chkfac = 1.6;
+o.srcfac = 1.3;  % 'auto'; % fix, or auto checks src curve self-int.  Sto 1.3
+o.chkfac = o.srcfac*1.1;
 o.curvemeth='2';
 pde = 'S';        % PDE: Lap or Helm or Sto
 
