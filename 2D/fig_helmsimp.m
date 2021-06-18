@@ -15,7 +15,7 @@ lpker = @(varargin) HelmDLP(k,varargin{:}) -1i*eta_CFIE*HelmSLP(k,varargin{:});
 refker = @(varargin) HelmDLPpotker(k,varargin{:}) -1i*eta_CFIE*HelmSLPpotker(k,varargin{:});  % ref needed for adaptive eval
 % QFS params...
 tol = 1e-12;
-o.verb = 1; o.curvemeth='2'; o.srcfac = 'auto'; %1.0;
+o.verb = 1; o.curvemeth='2'; %o.srcffac = 1.05;  % makes little diff
 qfsbker = @(b,varargin) lpker(b,varargin{:}) + 0.5*eye(b.N);  % JR, QFS-B only
 srcker = @(varargin) HelmDLP(k,varargin{:}) -1i*eta_CFIE*HelmSLP(k,varargin{:});
 %srcker = @(varargin) HelmSLP(k,varargin{:});  % plain charge sources

@@ -17,12 +17,12 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %  o = options struct:
 %       o.verb = 0,1,... verbosity  (0=silent, >3 plots geom).
 %       o.curvemeth = 'i' imaginary displ, 'n' normal displ, '2' 2nd-order displ
-%       o.srcfac = if present, enforce (override) source upsampling factor,
-%                  else uses auto choice (default).
+%       o.srcffac = extra multiplicative p/N srcfac (default 1.0).
 %       o.srcfixd = if present enforce (override) imag displacement of src curve
 %                   (needs correct sign), otherwise uses auto-choice (default).
-%       o.chkfac = enforce check upsampling factor (QFS-D only; default 1.0).
-%       o.factor = 's' (trunc SVD), 'l' (LU), 'q' (QR; not working).
+%       o.chkfac = enforce check upsampling factor (QFS-D only), otherwise auto.
+%       o.factor = dense factorization method:
+%                  's' (trunc SVD), 'l' (LU), 'q' (QR; not working).
 %       o.onsurf = 0 use off-surf check pts (default), 1 use on-surf self-eval
 %                  (1 assumes lpker(s,s) on-surf self-evaluates correctly).
 %                  QFS-B is onsurf=1, QFS-D is onsurf=0.
@@ -41,19 +41,19 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %           For Stokes 1e-4 is closest dist :(. Manas & I made better way using
 %           stable ker evals and local interp of (x-y) and (x-y).ny, to do.
 
-% Barnett 8/15/19. ncomp for Sto 3/19/21.
+% Barnett 8/15/19. ncomp for Sto 3/19/21, src/chk logic 6/18/21.
 if nargin==0, test_qfs_create; return; end
 if nargin<6, o=[]; end          % defaults...
 if ~isfield(o,'verb'), o.verb = 0; end
 if ~isfield(o,'onsurf'), o.onsurf = 0; end
+if ~isfield(o,'srcffac'), o.srcffac=1.0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
 if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
-if ~isfield(o,'srcfac'), o.srcfac='auto'; end
 N = b.N;                        % nodes on input bdry
 
-% QFS source curv choice, then p (# src)...
+% QFS source: curv choice, then p (# src)...
 tola = tol;                               % method-adjusted tol
-if o.curvemeth=='n', tola = tol/20; end   % equiv David's FF fudge fac
+if o.curvemeth=='n', tola = tol/10; end   % equiv David's FF fudge fac ~ 0.3
 if ~isfield(o,'srcfixd')    % auto-choose source curve displ imds
   srcsgn = -sign_from_side(interior);
   imds = srcsgn * log(1/tola)/N;          % imag displ of src, if N   *** try p
@@ -74,37 +74,32 @@ else
   if o.verb && intersectfun(b,imds,o)==-1, fprintf('o.srcfixd=%.3g self-intersects!\n',imds); end
 end
 ptol = abs(1/imds)*log(1/tola);        % criterion for # src to get adj tol
-if strcmp(o.srcfac,'auto')             % then decide p, # srcs...
-  srcfac = max(1.0, ptol/N);           % never have p<N
-else
-  srcfac=o.srcfac;                     % override
-  if o.verb && N*srcfac<0.95*ptol      % here 0.95 fudge factor avoids many msgs
-    fprintf('o.srcfac=%.3g override not enough for adj tol %.3g at imds=%.3g! (pred err=%.3g)\n',srcfac, tola, imds, exp(-srcfac*N*abs(imds)));
-  end
+srcfac = o.srcffac * max(1.0, ptol/N); % will control p = # srcs (never p<N)
+if o.verb && N*srcfac<0.95*ptol      % here 0.95 fudge factor avoids many msgs
+  fprintf('srcfac=%.3g not pred enough for adj tol %.3g at imds=%.3g! (pred err=%.3g)\n',srcfac, tola, imds, exp(-srcfac*N*abs(imds)));
 end
 s = shiftedbdry(b,imds,srcfac,o);      % make src curve (2 params: imds, srcfac)
 q.b = b; q.s = s;                      % copy out
 
-if o.onsurf
+if o.onsurf     % basic QFS-B, no chk pts needed...
   if o.verb, fprintf('QFS-B N=%3d tol=%5.3g\tsfac=%.2f (p=%d), d=%6.3f\n',N,tol,srcfac,s.N,imds); end
-else
-  % off-surf: QFS check (collocation) curve, specify by its imag shift (imd)
-  imd = imds*(1-log(eps)/log(tol)); % <0, use in/out ratio, not David 5.7-M
-  if ~isfield(o,'chkfac'), o.chkfac=1.1*srcfac; end   % default > # src
+else   % off-surf: QFS check (colloc) curve, specify by its imag shift (imd)..
+  imd = imds*(1-log(eps)/log(tola));    % <0, use in/out ratio, not David 5.7-M
+  if ~isfield(o,'chkfac'), o.chkfac=1.1*srcfac; end   % > # src, for spec(A) Sto
   valid = false; imdo=imd;
   while ~valid                    % move in check curve until valid...
     c = shiftedbdry(b,imd,o.chkfac,o);
     valid = isempty(selfintersect(real(c.x),imag(c.x)));
     if ~valid
       if o.verb>2, fprintf('chk: imd=%.3g intersects, reducing...\n',imd); end
-      imd = imd/1.1;
+      imd = imd/1.05;
     end
   end
   if o.verb>1 && imdo~=imd, fprintf('chk: adjusted imag dist from %.3g to %.3g...\n',imdo,imd); end
   bfac = log(1/eps)/abs(imd) / N;     % bdry c<-bf upsampling: NB emach not tol!
   if bfac<1.0, bfac=1.0; end          % since why bother
   Nf = ceil(bfac*N/2)*2;               % fine bdry, insure even
-  bf = setupquad(b,Nf);  % fine (upsampled) bdry
+  bf = setupquad(b,Nf);                % fine (upsampled) bdry object
   q.bf=bf; q.c=c;
   if o.verb, fprintf('QFS-D N=%3d tol=%5.3g\tsfac=%.2f (p=%d) d=%6.3f\t  bfac=%.2f,d=%6.3f\n',N,tol,srcfac,s.N,imds,bfac,imd); end
 end
@@ -208,7 +203,7 @@ function test_qfs_create  % basic test at fixed N, vs plain adaptive integration
 a = .3; w = 5;         % smooth wobbly radial shape params
 tol = 1e-12;   % 1e-12 N=380;   1e-16 N=180;
 N = 380; b = wobblycurve(1,a,w,N);  % really N here needs to grow as log(1/tol)
-o.srcfac = 1.0;                     % enforce upsampling
+o.srcffac = 1.05;                     % enforce some upsampling
 figure(10); clf; h = showcurve(b); hold on; interior=true;
 meths='n2i'; cols = 'bgr';
 for i=1:3, o.curvemeth=meths(i); o.verb = 1;
@@ -218,7 +213,7 @@ end
 axis equal tight; legend(h,'bdry','n','2','i');
 
 verb = 1; o.verb = verb; o.curvemeth = '2';      % 'n' int=1 poor, why?
-o.onsurf = 1;      % default 0
+o.onsurf = 0;      % default 0 (QFS-D), otherwise 1 (QFS-B)
 srcker = @LapSLP;  % fine for Laplace; will need CFIE for Helmholtz
 
 for interior = [false true], interior  % ------- loop over topologies
