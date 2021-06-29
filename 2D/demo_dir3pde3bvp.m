@@ -11,7 +11,7 @@ pdes = 'LHS';     % 1 char each
 figure;
 for ipde=1:3
   pde = pdes(ipde); fprintf('PDE=%s: ----------\n',pde)
-  qfs.srcfac=1.0; if pde=='S', qfs.srcfac = 1.2; end     % Sto bump up  
+  qfs.srcffac=1.05; if pde=='S', qfs.srcffac = 1.2; end     % Sto bump up  
   for ibvp=1:3
     interior = (ibvp==1);
     known = (ibvp<=2);

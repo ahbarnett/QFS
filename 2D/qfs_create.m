@@ -22,7 +22,8 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %                   (needs correct sign), otherwise uses auto-choice (default).
 %       o.chkfac = enforce check upsampling factor (QFS-D only), otherwise auto.
 %       o.factor = dense factorization method:
-%                  's' (trunc SVD), 'l' (LU), 'q' (QR; not working).
+%                  's' (trunc SVD, 2 mats), 'l' (LU), 'q' (QR; not working),
+%                  'n' (naive pseudoinv, single mat).
 %       o.onsurf = 0 use off-surf check pts (default), 1 use on-surf self-eval
 %                  (1 assumes lpker(s,s) on-surf self-evaluates correctly).
 %                  QFS-B is onsurf=1, QFS-D is onsurf=0.
@@ -50,14 +51,16 @@ if ~isfield(o,'srcffac'), o.srcffac=1.0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
 if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
 N = b.N;                        % nodes on input bdry
+if mod(N,2), error('b.N must be even for now!'); end
+if tol>1, error('tol should be <1!'); end
 
 % QFS source: curv choice, then p (# src)...
 tola = tol;                               % method-adjusted tol
 if o.curvemeth=='n', tola = tol/10; end   % equiv David's FF fudge fac ~ 0.3
 if ~isfield(o,'srcfixd')    % auto-choose source curve displ imds
   srcsgn = -sign_from_side(interior);
-  imds = srcsgn * log(1/tola)/N;          % imag displ of src, if N   *** try p
-  imdbig = 2.0*imds;
+  imds = srcsgn * log(1/tola)/N;          % imag displ of src, for tol@p=N
+  imdbig = 2.0*imds;                    % purely for checking self-int
   if intersectfun(b,imdbig,o)==-1       % then |d| > |d_int|/2, maybe not safe
     if ~interior, dmin = 0; dmax = imdbig; else, dmin = imdbig; dmax = 0; end
     tol = 1e-3;                    % enough for src loc
@@ -104,7 +107,7 @@ else   % off-surf: QFS check (colloc) curve, specify by its imag shift (imd)..
   if o.verb, fprintf('QFS-D N=%3d tol=%5.3g\tsfac=%.2f (p=%d) d=%6.3f\t  bfac=%.2f,d=%6.3f\n',N,tol,srcfac,s.N,imds,bfac,imd); end
 end
 
-if o.verb>3, figure; qfs_show(q); axis equal tight; drawnow; end   % geom
+if o.verb>3, figure(17); clf; qfs_show(q); axis equal tight; drawnow; end   % geom
 
 if o.onsurf            % simpler QFS-B
   cfb = lpker(b,b);    % assumes singular on-surf eval (incl JR +- limit), "A"
@@ -123,10 +126,26 @@ end                    % (differs from David who keeps E N*N, then src upsamp)
 if o.factor=='s'       % trunc SVD - guaranteed, but slow
   reps = 1e-15;        % relative eps to set rank truncation
   [U,S,V] = svd(E);
+  minsingval = min(diag(S));
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
-  if o.verb>2, fprintf('o.factor=s: E is %dx%d, r=%d\n',size(E,1),size(E,2),r); end
+  if o.verb>2, fprintf('o.factor=s: E is %dx%d, minsigval=%.3g, epstrunc=%.3g, r=%d\n',size(E,1),size(E,2),minsingval,reps,r); end
   q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);             % func evals coeffs from dens
+  %X = E\cfb;            % *** bad way (math correct)
+  %q.qfsco = @(dens) X*dens; % ***            % func evals coeffs from dens, bad way
+  if o.onsurf               % experimental only
+    q.Qnul = U(:,r+1:end);                          % keep onb for Nul E^T
+  else
+    Unul = U(:,r+1:end);                          % onb for Nul E^T
+    Qnul = cfb\Unul;    % dens vecs that cannot be produced
+    [q.Qnul,R] = qr(Qnul);  % onb for that subspace
+    %diag(R)
+    %svd(q.Qnul)
+  end
+elseif o.factor=='n'     % naive version of 's', unstable since 1 matvec.
+  X = E\cfb;                    % *** bad way (math correct)
+  q.Q1 = eye(N*ncomp); q.Q2 = X;
+  q.qfsco = @(dens) X*dens;     % func evals coeffs from dens, bad way
 elseif o.factor=='l'   % David's preferred. Q1,Q2 gets only 1e-9, sq or rect
   if diff(size(E))==0           % square case
     Is = eye(N*ncomp);          % dummy for qfsco below

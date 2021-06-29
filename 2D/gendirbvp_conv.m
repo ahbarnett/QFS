@@ -13,11 +13,12 @@ function [r g] = gendirbvp_conv(pde,interior,known,qfs,o)
 %  qfs      - optional struct for QFS params w/ optional fields:
 %             qfs.tol - tolerance
 %             qfs.onsurf - BIE system matrix filling: 1=QFS-B, 0=QFS-D (default)
-%                 etc
+%                 etc (see qfs_create)
 %  o        - optional struct controlling tests
 %             o.verb = 0,1,2...
 %             o.Ns = list of N values to test convergence over
 %             o.grid = struct with 1d lists grid.x, grid.y to eval prod grid
+%             o.imt0 = imag distance of source pt for known data
 % Outputs:
 %  r        - results struct with fields... (when columns, are for the Ns vals)
 %             Ns - row of N values used
@@ -39,6 +40,8 @@ function [r g] = gendirbvp_conv(pde,interior,known,qfs,o)
 if nargin<1, test_gendirbvp_conv; return; end
 if nargin<5, o=[]; end
 if ~isfield(o,'verb'), o.verb=0; end
+% known: default data decay rate: emach by N0 @ the N-rate or 2N0 @ N/2-rate...
+if ~isfield(o,'imt0'), o.imt0=log(1/eps)/250; end    % N0=250
 
 % BVP test case setup
 a = .3; w = 5;   % smooth wobbly radial shape params
@@ -57,12 +60,13 @@ b = wobblycurve(1,a,w,100);    % only to access b.Z
 sgn = -1+2*interior;              % David convention (+1 if interior)
 if known
   t0 = 0.5;   % bdry param to base the rhs pt src on
-  N0=250; imt0 = -log(eps)/N0;   % emach by N0 @ the N-rate or 2N0 @ N/2-rate
-  z0 = b.Z(t0 - 1i*sgn*imt0);    % data src pt, given imag dist, sets conv rate
+  z0 = b.Z(t0 - 1i*sgn*o.imt0);  % data src pt, given imag dist, sets conv rate
   if pde=='L'                    % (see GRF_conv.m for fx,fy Neu data...)
     f0 = exp(1i*4.0);            % strength to give data size O(1), phase orient
-    %fholom = @(z) f0./(z-z0);    % holom ext soln, with no log nor const
-    fholom = @(z) 1.0*log(z-z0);     % ext soln w/ log (net charge), but zero offset still
+    fholom = @(z) f0./(z-z0);    % holom ext soln, with no log nor const
+    %z1 = b.Z(2.5 - 1i*sgn*o.imt0);
+    %fholom = @(z) f0./(z-z0) + f0./(z-z1);
+    %fholom = @(z) 1.0*log(z-z0) + 0*f0./(z-z0) + 0.0;     % ext soln w/ log (net charge -> unclear how knows the charge?), but zero offset still
     f = @(z) real(fholom(z));    % use real part as known Laplace soln
   elseif pde=='H'
     f = @(z) 2.0 * besselh(0,khelm*abs(z-z0));    % point source at z0
@@ -92,11 +96,13 @@ ncomp = 1 + (pde=='S');           % # vector cmpts dep on PDE type
 if interior, trg.x = -0.1+0.2i;   % BVP soln tests: far int target point
 else trg.x = 1.5-0.5i; end        % far ext target point (for int known)
 nrdist = 1e-4;                    % adaptive DLP dies any closer than 1e-6, sad
-s=4.0; trg.x(2) = b.Z(s) -sgn*nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % near test pt
+s=4.0; trg.x(2) = b.Z(s) - sgn*nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % near test pt
 trg.x=trg.x(:); uex = cmpak(f(trg.x),ncomp);   % u_exact vals (or pack as C-#)
 if o.verb>1, figure(1); clf; plot([b.x; b.x(1)],'-'); hold on;
-  if exist('z0','var'), plot(z0,'r*'); end
-  plot(trg.x, 'k+'); axis equal; drawnow; end
+  plot(trg.x, 'k+');
+  if exist('z0','var'), plot(z0,'r*'); legend('bdry','targets','data z_0');
+  else, legend('bdry','targets'); end
+  axis equal; drawnow; end
   
 
 % PDE-specific setup, the BVP data...
@@ -115,9 +121,9 @@ end
 srcker = lpker;    % what we claim about QFS: uses the same rep as BIE
 
 % convergence in # Nystrom pts ..................
-if isfield(o,'Ns'), Ns=o.Ns; else, Ns = 70:30:500; end
+if isfield(o,'Ns'), Ns=o.Ns; else, Ns = 40:30:500; end
 % save stuff...
-eA = nan(numel(Ns),1); ed=eA; fd=eA; d1=[eA,eA]; u=d1; u0=d1; eu=[d1,d1]; kA=d1; % >=1cols
+eA = nan(numel(Ns),1); ed=eA; fd=eA; d0d=eA; d1=[eA,eA]; u=d1; u0=d1; eu=[d1,d1]; kA=d1; % >=1cols
 for i=1:numel(Ns); N=Ns(i);
   b = wobblycurve(1,a,w,N);
   selfker = @(varargin) lpker(varargin{:}) - 0.5*sign_from_side(interior)*eye(ncomp*N);  % JR for Dirichlet BVP; N inside qfs_create fixed
@@ -125,6 +131,7 @@ for i=1:numel(Ns); N=Ns(i);
   else, q = qfs_create(b,interior,lpker,srcker,qfs.tol,qfs); end         % QFS-D
   B = srcker(b,q.s);   % s2b
   A = (B*q.Q2)*q.Q1;   % QFS nyst (kinda redundant for QFS-B, but useful test)
+  if ~isempty(q.Qnul), A = A + 0.5*q.Qnul*q.Qnul'; end   % proj fix A spec; 0.5 is not critical, just O(1)
   A0 = selfker(b,b);   % gold-standard Kress nyst
   eA(i) = max(abs(A(:)-A0(:)));   % matrix el err - doesn't have to be small
   if pde=='S' && interior    % int Sto needs nullspace 1s-mat correction...
@@ -139,6 +146,7 @@ for i=1:numel(Ns); N=Ns(i);
   rhs = f(b.x);                        % Dirichlet data
   fhat=fft(rhs(1:N)); fd(i)=abs(fhat(N/2+1)/max(fhat));  % RHS_1 Fou n/2 decay
   dens = A\rhs; dens0=A0\rhs;          % solves (us and Kress)
+  d0hat=fft(dens0(1:N)); d0d(i)=abs(d0hat(N/2+1)/max(d0hat));  % dens0_1 decay
   %[svd(A), svd(A0)]
   d1(i,:)=[dens0(1), dens(1)];         % dens soln at 1st (fixed) node, 1st cmpt
   kA(i,:) = [cond(A0), cond(A)];
@@ -162,7 +170,7 @@ if ~known, uex = u0(end,:); eu = abs([u0,u] - [uex,uex]); end
 
 % pass out
 r.Ns=Ns; r.eu=eu; r.eA=eA; r.ed=ed; r.d1=d1; r.kA=kA; r.A=A; r.A0=A0; r.fd=fd;
-r.u=u; r.u0=u0;
+r.u=u; r.u0=u0; r.d0d=d0d;
 
 g.q = q; if known, g.z0 = z0; end
 if isfield(o,'grid')    % eval on 2D grid using last N value.......
@@ -186,24 +194,6 @@ if isfield(o,'grid')    % eval on 2D grid using last N value.......
 end
 %%%%%%%%%%%%%%%%%
 
-function z = cmpak(v,ncomp)          % helpers:  if ncomp=2 pack pairs as C-#s
-if ncomp==1, z=v;
-elseif ncomp==2, z=v(1:end/2)+1i*v(end/2+1:end);
-else, error('cmpak only for ncomp=1 or 2!');
-end
-
-function fun=interpfunfromgrid(y,ncomp)  % gives a func handle (scalar or vec)
-% this is for 1d grids, periodic only.
-if ncomp==1
-  [~,fun] = perispecinterparb(y,nan);   % scalar spectral interpolant
-elseif ncomp==2
-  N = numel(y)/ncomp;
-  [~,fun1] = perispecinterparb(y(1:N),nan);   % vector spectral interpolant
-  [~,fun2] = perispecinterparb(y(N+1:end),nan);   % vector spectral interpolant
-  fun = @(t) [fun1(t); fun2(t)];                 % stack cmpts
-else, error('interpfunfromgrid only for ncomp=1 or 2!');
-end
-
 function rhs = applyStokesPDEs(f,x,mu,eps)   % from BIE2D/test/testStokernels
 % check if func f (returning 3 components: u_1, u_2, and p, given C-# loc x)
 % obeys mu-Stokes PDE. Outputs the RHS (3 components: f_1, f_2, and rho)
@@ -222,16 +212,15 @@ rhs(3)   =  divu;
 
 %%%%%%%%%%%%%%%%%%%%%
 function test_gendirbvp_conv
-pde='L';
+pde='L'; qfs.srcffac = 1.0;   % L or H
+%pde='S'; qfs.srcffac = 1.3;
 interior=0;
 known=1;
 qfs.tol = 1e-12;
-qfs.onsurf = 1;  % 1 makes QFS-B: only seems to affect ed (dens err)
-qfs.srcffac = 1.05;   % 1.2 for Sto, 1.05 for others
-%qfs.chkfac = 1.0*qfs.srcfac;  % 1.1 for Sto
-o.verb = 1;
-o.grid = [];      % tells to do grid eval
+qfs.onsurf = 1;  % 1 makes QFS-B (can ignore ed dens err then)
+o.verb = 3;       % 4 for src locs
 %o.Ns = 400;
+o.grid = [];      % tells to do grid eval
 [r g] = gendirbvp_conv(pde,interior,known,qfs,o);  % do conv -> results struct
 N=r.Ns;
 
