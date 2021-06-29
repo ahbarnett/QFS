@@ -50,8 +50,7 @@ if ~isfield(o,'onsurf'), o.onsurf = 0; end
 if ~isfield(o,'srcffac'), o.srcffac=1.0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
 if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
-N = b.N;                        % nodes on input bdry
-if mod(N,2), error('b.N must be even for now!'); end
+N = b.N; if mod(N,2), error('b.N must be even for now!'); end    % # user nodes
 if tol>1, error('tol should be <1!'); end
 
 % QFS source: curv choice, then p (# src)...
@@ -63,23 +62,22 @@ if ~isfield(o,'srcfixd')    % auto-choose source curve displ imds
   imdbig = 2.0*imds;                    % purely for checking self-int
   if intersectfun(b,imdbig,o)==-1       % then |d| > |d_int|/2, maybe not safe
     if ~interior, dmin = 0; dmax = imdbig; else, dmin = imdbig; dmax = 0; end
-    tol = 1e-3;                    % enough for src loc
-    [imdint, nsteps] = bisect(@(d) intersectfun(b,d,o), dmin, dmax, tol);
+    [imdint, nsteps] = bisect(@(d) intersectfun(b,d,o), dmin, dmax, 1e-3); % crude tol for src loc only
     badimdfrac = 1.0;               % must be >0.5 due to defn of imdbig above
     imdbad = badimdfrac*imdint;             % borderline bad imag displ
     if abs(imds)>abs(imdbad)
-      if o.verb, fprintf('src: changing imag displ from near-self-int %.3g to %.3g...\n',imds,imdbad); end
+      if o.verb, fprintf('\t qfs_create, src self-int: changing imag displ %.3g to %.3g...\n',imds,imdbad); end
       imds = imdbad;
     end
   end
 else
   imds = o.srcfixd;           % user has to override w/ correct sign too :)
-  if o.verb && intersectfun(b,imds,o)==-1, fprintf('o.srcfixd=%.3g self-intersects!\n',imds); end
+  if o.verb && intersectfun(b,imds,o)==-1, fprintf('qfs_create: o.srcfixd=%.3g self-intersects!\n',imds); end
 end
 ptol = abs(1/imds)*log(1/tola);        % criterion for # src to get adj tol
 srcfac = o.srcffac * max(1.0, ptol/N); % will control p = # srcs (never p<N)
 if o.verb && N*srcfac<0.95*ptol      % here 0.95 fudge factor avoids many msgs
-  fprintf('srcfac=%.3g not pred enough for adj tol %.3g at imds=%.3g! (pred err=%.3g)\n',srcfac, tola, imds, exp(-srcfac*N*abs(imds)));
+  fprintf('qfs_create: srcfac=%.3g not pred enough for adj tol %.3g at imds=%.3g! (pred err=%.3g)\n',srcfac, tola, imds, exp(-srcfac*N*abs(imds)));
 end
 s = shiftedbdry(b,imds,srcfac,o);      % make src curve (2 params: imds, srcfac)
 q.b = b; q.s = s;                      % copy out
@@ -94,8 +92,8 @@ else   % off-surf: QFS check (colloc) curve, specify by its imag shift (imd)..
     c = shiftedbdry(b,imd,o.chkfac,o);
     valid = isempty(selfintersect(real(c.x),imag(c.x)));
     if ~valid
-      if o.verb>2, fprintf('chk: imd=%.3g intersects, reducing...\n',imd); end
-      imd = imd/1.05;
+      if o.verb>2, fprintf('\tqfs_create, chk: imd=%.3g self-intersects, reducing...\n',imd); end
+      imd = imd/1.05;                % *** crude, should update to bisect
     end
   end
   if o.verb>1 && imdo~=imd, fprintf('chk: adjusted imag dist from %.3g to %.3g...\n',imdo,imd); end
@@ -131,16 +129,16 @@ if o.factor=='s'       % trunc SVD - guaranteed, but slow
   if o.verb>2, fprintf('o.factor=s: E is %dx%d, minsigval=%.3g, epstrunc=%.3g, r=%d\n',size(E,1),size(E,2),minsingval,reps,r); end
   q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);             % func evals coeffs from dens
-  %X = E\cfb;            % *** bad way (math correct)
-  %q.qfsco = @(dens) X*dens; % ***            % func evals coeffs from dens, bad way
-  if o.onsurf               % experimental only
-    q.Qnul = U(:,r+1:end);                          % keep onb for Nul E^T
-  else
-    Unul = U(:,r+1:end);                          % onb for Nul E^T
-    Qnul = cfb\Unul;    % dens vecs that cannot be produced
-    [q.Qnul,R] = qr(Qnul);  % onb for that subspace
-    %diag(R)
-    %svd(q.Qnul)
+  if 0                % experimental only (spit out Qnul)...
+    if o.onsurf
+      q.Qnul = U(:,r+1:end);                          % keep onb for Nul E^T
+    else
+      Unul = U(:,r+1:end);                          % onb for Nul E^T
+      Qnul = cfb\Unul;    % dens vecs that cannot be produced
+      [q.Qnul,R] = qr(Qnul);  % onb for that subspace
+      %diag(R)
+      %svd(q.Qnul)
+    end
   end
 elseif o.factor=='n'     % naive version of 's', unstable since 1 matvec.
   X = E\cfb;                    % *** bad way (math correct)
