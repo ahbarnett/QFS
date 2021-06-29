@@ -12,9 +12,10 @@ mu=0.7;          % viscosity (Sto only)
 
 t0 = 0.5;   % bdry param to base the rhs data src on
 imt0 = 0.15;   % choose source dist
-Nwhatever = 100; b = curve(Nwhatever); clear Nwhatever   % only to access b.Z
 sgn = -1+2*interior;              % David convention (+1 if interior)
-z0 = b.Z(t0 - 1i*sgn*imt0);       % data src pt, given imag dist, sets conv rate
+tsing = t0 - 1i*sgn*imt0;         % singularity in complex t
+Nwhatever = 100; b = curve(Nwhatever); clear Nwhatever   % only to access b.Z
+z0 = b.Z(tsing);                  % data src pt, given imag dist, sets conv rate
 if interior, trg.x = -0.1+0.2i;   % far int target point
 else trg.x = 1.5-0.5i; end        % far ext target point
 nrdist = 1e-4;                % adaptive DLP dies any closer than 1e-5, sad
@@ -24,7 +25,7 @@ trg.x=trg.x(:);
 lp = 'D';             % or 'D'.  LP flavor to test
 qfs.onsurf = 1;       % 1 makes QFS-B, 0 for QFS-D
 qfs.factor = 's'; qfs.meth='2'; qfs.verb=1; % QFS meth pars
-pdes = 'L'; %'LHS';     % which PDEs to test, 1 char each
+pdes = 'H'; %'LHS';     % which PDEs to test, 1 char each
 pdenam = {'Laplace', 'Helmholtz k=20', 'Stokes'};
 tols = [1e-4 1e-8 1e-12];
 Ns = 30:30:420;
@@ -37,16 +38,21 @@ for ipde=1:numel(pdes)
   if pde=='L'                       % wrap the LPs in PDE-indep way
     SLP = @LapSLP; DLP = @LapDLP;
     SLPker = @LapSLPpotker; DLPker = @LapDLPpotker;
-    qfseta = 1.0;                 % eta for QFS rep
+    qfseta = 1.0;                      % D+eta.S mixing for QFS rep
   elseif pde=='H'
-    
+    SLP = @(varargin) HelmSLP(khelm,varargin{:});
+    DLP = @(varargin) HelmDLP(khelm,varargin{:});
+    SLPker = @(varargin) HelmSLPpotker(khelm,varargin{:});
+    DLPker = @(varargin) HelmDLPpotker(khelm,varargin{:});
+    qfseta = 1i*khelm;                 % D+eta.S mixing for QFS rep
   elseif pde=='S'
     
   end
   subplot(1,numel(pdes),ipde);
   
   % density func wrt t param, analytic w/ known singularity
-  densfun = @(t) (0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0));
+  %densfun = @(t) (0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0));
+  densfun = @(t) (0.5+sin(3*t+1)).*cot((t-tsing)/2);   % known t-plane peri sing
   if pde=='S'
     densfun = @(t) [(0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0)); cos(2*t-1).*real(exp(5i)./(b.Z(t)-z0))];
   end
@@ -93,7 +99,7 @@ for ipde=1:numel(pdes)
       h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap','$\hat \tau$ decay','$e^{-\delta_\ast n/2}$');
       set(h,'interpreter','latex');
       xlabel('N');
-      axis([min(Ns), max(Ns), 1e-15 1e0])
+      axis([Ns(1), Ns(end-1), 1e-15 1e0])
     end  
     hline(tol,'b:');
   end
