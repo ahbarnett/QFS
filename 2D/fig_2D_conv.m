@@ -22,43 +22,46 @@ nrdist = 1e-4;                % adaptive DLP dies any closer than 1e-5, sad
 s=4.0; trg.x(2) = b.Z(s) - sgn*nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % nr test pt
 trg.x=trg.x(:);
 
-lp = 'D';             % or 'D'.  LP flavor to test
+lp = 'D';             % or 'D'.  LP flavor to test (changes output filename)
 qfs.onsurf = 1;       % 1 makes QFS-B, 0 for QFS-D
 qfs.factor = 's'; qfs.meth='2'; qfs.verb=1; % QFS meth pars
-pdes = 'LH'; %'LHS';     % which PDEs to test, 1 char each
-pdenam = {'Laplace', 'Helmholtz k=20', 'Stokes'};
+pdes = 'LHS';         % which PDEs to test, 1 char each
+pdenam = {'Laplace', sprintf('Helm.%s        k=%g',char(10),khelm), 'Stokes'};
 tols = [1e-4 1e-8 1e-12];
 Ns = 30:30:420;
 fig=figure;
 
 for ipde=1:numel(pdes)
   pde = pdes(ipde); fprintf('PDE=%s: -----------------------\n',pdenam{ipde})
-  %  qfs.srcffac=1.05; if pde=='S', qfs.srcffac = 1.2; end     % Sto bump up  
   ncomp = 1 + (pde=='S');           % # vector cmpts dep on PDE type
+  side = 'e'; if interior, side = 'i'; end  % LSC2D bary setup
   qfseta = 1.0;                      % D+eta.S mixing for QFS rep
+  if pde=='S', qfs.srcffac = 1.2; end     % Sto bump up for QFS-B even
   if pde=='L'                       % wrap the LPs in PDE-indep way
     SLP = @LapSLP; DLP = @LapDLP;
     SLPker = @LapSLPpotker; DLPker = @LapDLPpotker;
-    SLPclo = @LapSLP_closeglobal; DLPclo = @LapDLP_closeglobal;  % LSC2D meth
+    SLPclo = @(t,s,d) LapSLP_closeglobal(t,s,d,side);
+    DLPclo = @(t,s,d) LapDLP_closeglobal(t,s,d,side);
   elseif pde=='H'
     SLP = @(varargin) HelmSLP(khelm,varargin{:});
     DLP = @(varargin) HelmDLP(khelm,varargin{:});
     SLPker = @(varargin) HelmSLPpotker(khelm,varargin{:});
     DLPker = @(varargin) HelmDLPpotker(khelm,varargin{:});
-    qfseta = 1i*khelm;                 % use Kress CFIE for QFS rep
+    qfseta = 1i*khelm;              % use Kress CFIE for QFS's src rep
   elseif pde=='S'
     SLP = @(t,s,varargin) StoSLP(t,s,mu,varargin{:});
     DLP = @(t,s,varargin) StoDLP(t,s,mu,varargin{:});
     SLPker = @(varargin) StoSLPvelker(mu,varargin{:});
     DLPker = @(varargin) StoDLPvelker(mu,varargin{:});
+    SLPclo = @(t,s,d) StoSLP_closeglobal(t,s,mu,d,side);
+    DLPclo = @(t,s,d) StoDLP_closeglobal(t,s,mu,d,side);
   end
   
-  % density func wrt t param, analytic w/ known singularity
-  %densfun = @(t) (0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0));
-  densfun = @(t) (0.5+sin(3*t+1)).*cot((t-tsing)/2);   % known t-plane peri sing, complex
+  % density func wrt t param, real (for L,S) analytic w/ known singularity...
+  densfun = @(t) (0.5+sin(3*t+1)).*cot((t-tsing)/2);  % cmplx, w/ peri t-sing
   if pde=='L', densfun = @(t) real(densfun(t)); end
   if pde=='S'
-    densfun = @(t) [(0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0)); cos(2*t-1).*real(exp(5i)./(b.Z(t)-z0))];      % *** use cot too?
+    densfun = @(t) [(0.5+sin(3*t+1)).*real(exp(4i)*cot((t-tsing)/2)); cos(2*t-1).*real(exp(5i)*cot((t-tsing)/2))];
   end
   
   if lp=='S'   % works for any PDE. For Dirichet (pot or vel) data match
@@ -86,8 +89,7 @@ for ipde=1:numel(pdes)
         u0(i,:) = cmpak(LP(trg,b,dens),ncomp);          % smooth rule @ all trgs
         interpdensfun = interpfunfromgrid(dens,ncomp);  % scalar or vector
         u0(i,2) = cmpak(lpevaladapt(trg.x(2), ker, interpdensfun, b, 1e-12),ncomp);  % adap for nr targ only
-        side = 'e'; if interior, side = 'i'; end
-        uc(i,:) = cmpak(LPclo(trg,b,dens,side),ncomp);  % LSC2D bary clo meth
+        uc(i,:) = cmpak(LPclo(trg,b,dens),ncomp);       % LSC2D bary close eval
       end
       % QFS setup & do...
       if qfs.onsurf, qfsnam = 'QFS-B';          % needs on-surf A matrix
@@ -107,10 +109,10 @@ for ipde=1:numel(pdes)
       fdpred = exp(-imt0*Ns/2);             % Nyq Fou decay prediction
       if pde=='H'             % no bary for Helm, or would be new research :(
         hp = semilogy(Ns,eu(:,1),'k+-', Ns,eu(:,2),'k.-', Ns,eu0(:,1),'g+-', Ns,eu0(:,2),'g.-', Ns,dd,'r-', Ns,fdpred,'m--');  % grab handle for legend
-        h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap','$\hat \tau$ decay','$e^{-\delta_\ast n/2}$');
+        h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap.','$\hat \tau$ decay','$e^{-\delta_\ast N/2}$');
       else
-        hp = semilogy(Ns,eu(:,1),'k+-', Ns,eu(:,2),'k.-', Ns,eu0(:,1),'g+-', Ns,eu0(:,2),'g.-', Ns,euc(:,2),'bo-', Ns,dd,'r-', Ns,fdpred,'m--');  % grab handle for legend
-        h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap','nr, bary','$\hat \tau$ decay','$e^{-\delta_\ast n/2}$');
+        hp = semilogy(Ns,eu(:,1),'k+-', Ns,eu(:,2),'k.-', Ns,eu0(:,1),'g+-', Ns,eu0(:,2),'g.-', Ns,euc(:,2),'co-', Ns,dd,'r-', Ns,fdpred,'m--');  % grab handle for legend
+        h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap.','nr, bary.','$\hat \tau$ decay','$e^{-\delta_\ast N/2}$');
       end
       set(h,'interpreter','latex');
       xlabel('N'); ylabel('abs error');
@@ -119,6 +121,11 @@ for ipde=1:numel(pdes)
     hline(tol,'b:');
     text(Ns(1)+10,tol*0.3,sprintf('$\\epsilon_a=$%.0e',tol),'color',[0 0 1],'interpreter','latex');
   end
-  text(Ns(1)+20, 0.3, sprintf('(%s) %s',char(96+ipde),pdenam{ipde}));
+  text(Ns(1)+20, 0.3, sprintf('(%s) %sLP %s',char(96+ipde),lp,pdenam{ipde}));
   drawnow
 end
+
+set(gcf,'paperposition',[0 0 12 4]);
+print -dpng tmp.png
+file = sprintf('2DB_conv_%sLP.png',lp);
+system(['convert tmp.png -trim ' file ' && rm -f tmp.png']);
