@@ -1,12 +1,12 @@
-% 2D ext QFS-B conv plots, 3 PDEs, on single shape, each of S, D, separately.
-% This is more primitive that GRF test - could add GRF easily.
-% Start with: QFS-B for Lap {S or D}LP, vs gold std eval.
-
+% 2D ext QFS-B/D conv plots, 3 PDEs, on single shape, each of S, D, separately.
+% This is more primitive than GRF test (could add GRF easily, no need yet).
+% Compares to gold std eval and LSC2D meth.
 % Barnett 6/29/21
+
 clear; %close all
 interior = 0;
 a = .3; w = 5;   % smooth wobbly radial shape params
-curve = @(N) wobblycurve(1,a,w,N);    % only to access b.Z
+curve = @(N) wobblycurve(1,a,w,N);    % wrap the discretized bdry struct-maker
 khelm = 20.0;    % wavenumber (Helm only)
 mu=0.7;          % viscosity (Sto only)
 
@@ -25,7 +25,7 @@ trg.x=trg.x(:);
 lp = 'D';             % or 'D'.  LP flavor to test
 qfs.onsurf = 1;       % 1 makes QFS-B, 0 for QFS-D
 qfs.factor = 's'; qfs.meth='2'; qfs.verb=1; % QFS meth pars
-pdes = 'H'; %'LHS';     % which PDEs to test, 1 char each
+pdes = 'LH'; %'LHS';     % which PDEs to test, 1 char each
 pdenam = {'Laplace', 'Helmholtz k=20', 'Stokes'};
 tols = [1e-4 1e-8 1e-12];
 Ns = 30:30:420;
@@ -33,43 +33,50 @@ fig=figure;
 
 for ipde=1:numel(pdes)
   pde = pdes(ipde); fprintf('PDE=%s: -----------------------\n',pdenam{ipde})
-%  qfs.srcffac=1.05; if pde=='S', qfs.srcffac = 1.2; end     % Sto bump up  
+  %  qfs.srcffac=1.05; if pde=='S', qfs.srcffac = 1.2; end     % Sto bump up  
   ncomp = 1 + (pde=='S');           % # vector cmpts dep on PDE type
+  qfseta = 1.0;                      % D+eta.S mixing for QFS rep
   if pde=='L'                       % wrap the LPs in PDE-indep way
     SLP = @LapSLP; DLP = @LapDLP;
     SLPker = @LapSLPpotker; DLPker = @LapDLPpotker;
-    qfseta = 1.0;                      % D+eta.S mixing for QFS rep
+    SLPclo = @LapSLP_closeglobal; DLPclo = @LapDLP_closeglobal;  % LSC2D meth
   elseif pde=='H'
     SLP = @(varargin) HelmSLP(khelm,varargin{:});
     DLP = @(varargin) HelmDLP(khelm,varargin{:});
     SLPker = @(varargin) HelmSLPpotker(khelm,varargin{:});
     DLPker = @(varargin) HelmDLPpotker(khelm,varargin{:});
-    qfseta = 1i*khelm;                 % D+eta.S mixing for QFS rep
+    qfseta = 1i*khelm;                 % use Kress CFIE for QFS rep
   elseif pde=='S'
-    
+    SLP = @(t,s,varargin) StoSLP(t,s,mu,varargin{:});
+    DLP = @(t,s,varargin) StoDLP(t,s,mu,varargin{:});
+    SLPker = @(varargin) StoSLPvelker(mu,varargin{:});
+    DLPker = @(varargin) StoDLPvelker(mu,varargin{:});
   end
-  subplot(1,numel(pdes),ipde);
   
   % density func wrt t param, analytic w/ known singularity
   %densfun = @(t) (0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0));
-  densfun = @(t) (0.5+sin(3*t+1)).*cot((t-tsing)/2);   % known t-plane peri sing
+  densfun = @(t) (0.5+sin(3*t+1)).*cot((t-tsing)/2);   % known t-plane peri sing, complex
+  if pde=='L', densfun = @(t) real(densfun(t)); end
   if pde=='S'
-    densfun = @(t) [(0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0)); cos(2*t-1).*real(exp(5i)./(b.Z(t)-z0))];
+    densfun = @(t) [(0.5+sin(3*t+1)).*real(exp(4i)./(b.Z(t)-z0)); cos(2*t-1).*real(exp(5i)./(b.Z(t)-z0))];      % *** use cot too?
   end
   
-  if lp=='S'   % works for any PDE. For Dirichet (value or vel) data match
+  if lp=='S'   % works for any PDE. For Dirichet (pot or vel) data match
     LP = SLP;
     ker = SLPker;
-    JRterm = 0;     % Id term for on-surf A fill
+    LPclo = SLPclo;
+    JRterm = 0;     % Id term for on-surf A fill (pot or vel, QFS needs)
   elseif lp=='D'
     LP = DLP;
     ker = DLPker;
+    LPclo = DLPclo;
     JRterm = -0.5*sgn;
   else   % *** also test combos, CFIE, this way? (but not GRF?)
   end
   
-  dd=nan(numel(Ns),1); u=[dd,dd]; u0=u;          % alloc conv metrics
-  for itol=1:numel(tols)   % *** to add in, legend only for itol=1
+  subplot(1,numel(pdes),ipde);   % one subplot per PDE...
+  dd=nan(numel(Ns),1); u=[dd,dd]; u0=u; uc=u;          % alloc conv metrics
+  for itol=1:numel(tols)
     tol = tols(itol); fprintf('qfs tol=%.3g:.......\n',tol)
     for i=1:numel(Ns), N=Ns(i); %fprintf('\tN=%d:\n',N);
       b = curve(N);           % setup discretization
@@ -79,6 +86,8 @@ for ipde=1:numel(pdes)
         u0(i,:) = cmpak(LP(trg,b,dens),ncomp);          % smooth rule @ all trgs
         interpdensfun = interpfunfromgrid(dens,ncomp);  % scalar or vector
         u0(i,2) = cmpak(lpevaladapt(trg.x(2), ker, interpdensfun, b, 1e-12),ncomp);  % adap for nr targ only
+        side = 'e'; if interior, side = 'i'; end
+        uc(i,:) = cmpak(LPclo(trg,b,dens,side),ncomp);  % LSC2D bary clo meth
       end
       % QFS setup & do...
       if qfs.onsurf, qfsnam = 'QFS-B';          % needs on-surf A matrix
@@ -90,17 +99,26 @@ for ipde=1:numel(pdes)
       u(i,:) = cmpak(qfsrep(trg,q.s,cod),ncomp);   % QFS: eval (all trg), done
     end
     eu0 = abs(u0-u0(end,:)); eu = abs(u-u0(end,:));    % errors (vs ref u0)
-    fdpred = exp(-imt0*Ns/2);
+    euc = abs(uc-u0(end,:));
     
     if itol<numel(tols)
       semilogy(Ns,eu(:,1),'k+-', Ns,eu(:,2),'k.-'); hold on;
     else
-      hp = semilogy(Ns,eu(:,1),'k+-', Ns,eu(:,2),'k.-', Ns,eu0(:,1),'b+-', Ns,eu0(:,2),'b.-', Ns,dd,'r-', Ns,fdpred,'m--');  % grab handle for legend
-      h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap','$\hat \tau$ decay','$e^{-\delta_\ast n/2}$');
+      fdpred = exp(-imt0*Ns/2);             % Nyq Fou decay prediction
+      if pde=='H'             % no bary for Helm, or would be new research :(
+        hp = semilogy(Ns,eu(:,1),'k+-', Ns,eu(:,2),'k.-', Ns,eu0(:,1),'g+-', Ns,eu0(:,2),'g.-', Ns,dd,'r-', Ns,fdpred,'m--');  % grab handle for legend
+        h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap','$\hat \tau$ decay','$e^{-\delta_\ast n/2}$');
+      else
+        hp = semilogy(Ns,eu(:,1),'k+-', Ns,eu(:,2),'k.-', Ns,eu0(:,1),'g+-', Ns,eu0(:,2),'g.-', Ns,euc(:,2),'bo-', Ns,dd,'r-', Ns,fdpred,'m--');  % grab handle for legend
+        h = legend(hp,['far, ',qfsnam],['nr, ',qfsnam], 'far, plain','nr, adap','nr, bary','$\hat \tau$ decay','$e^{-\delta_\ast n/2}$');
+      end
       set(h,'interpreter','latex');
-      xlabel('N');
+      xlabel('N'); ylabel('abs error');
       axis([Ns(1), Ns(end-1), 1e-15 1e0])
     end  
     hline(tol,'b:');
+    text(Ns(1)+10,tol*0.3,sprintf('$\\epsilon_a=$%.0e',tol),'color',[0 0 1],'interpreter','latex');
   end
+  text(Ns(1)+20, 0.3, sprintf('(%s) %s',char(96+ipde),pdenam{ipde}));
+  drawnow
 end
