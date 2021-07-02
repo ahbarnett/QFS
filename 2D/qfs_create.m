@@ -27,6 +27,8 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %       o.onsurf = 0 use off-surf check pts (default), 1 use on-surf self-eval
 %                  (1 assumes lpker(s,s) on-surf self-evaluates correctly).
 %                  QFS-B is onsurf=1, QFS-D is onsurf=0.
+%       o.extrarow = 1 add ncomp row(s) to linear system to fix total strength
+%                  to total dens (handles bdry logcap=1), or 0 (default).
 %
 % Outputs: QFS struct (object) q containing fields:
 %  s - QFS source curve with s.x nodes, s.w weights, and s.nx normals.
@@ -50,6 +52,7 @@ if ~isfield(o,'onsurf'), o.onsurf = 0; end
 if ~isfield(o,'srcffac'), o.srcffac=1.0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
 if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
+if ~isfield(o,'extrarow'), o.extrarow=0; end
 N = b.N; if mod(N,2), error('b.N must be even for now!'); end    % # user nodes
 if tol>1, error('tol should be <1!'); end
 
@@ -119,6 +122,14 @@ else
   cfb = K*I;           % matrix giving check vals from original bdry dens
   E = srcker(c,s);     % fill c<-s mat (becomes fat if src upsamp from invalid)
 end                    % (differs from David who keeps E N*N, then src upsamp)
+if o.extrarow
+  srctotrows = s.w'; bdrytotrows = b.w';                   % Laplace case
+  % (note in the paper the srctotrow is ones, but we have weights in the QFS
+  %  rep not notated in the paper)
+  if ncomp==2, srctotrows = [s.w',0*s.w'; 0*s.w',s.w'];    % Stokes (loses nr
+    bdrytotrows = [b.w',0*b.w'; 0*b.w',b.w']; end          %  digits but why?)
+  E = [E; srctotrows]; cfb = [cfb; bdrytotrows]; 
+end
 
 % Now factor the E matrix...
 if o.factor=='s'       % trunc SVD - guaranteed, but slow
