@@ -111,7 +111,7 @@ if pde=='L'
   lpker = @(varargin) LapDLP(varargin{:}) + eta*LapSLP(varargin{:});
   refker = @(varargin) LapDLPpotker(varargin{:}) + eta*LapSLPpotker(varargin{:});  % ref needed for adaptive eval
 elseif pde=='H'
-  eta = 0.0 - 1i*khelm*(~interior);   % CFIE for ext only
+  eta = 0.0 - 1i*khelm*(~interior);   % CFIE for ext only (D-ikS sign)
   lpker = @(varargin) HelmDLP(khelm,varargin{:}) + eta*HelmSLP(khelm,varargin{:});
   refker = @(varargin) HelmDLPpotker(khelm,varargin{:}) + eta*HelmSLPpotker(khelm,varargin{:});
 elseif pde=='S'

@@ -75,18 +75,18 @@ subplot(2,3,3);   % QFS-B conv
 ufex = us(end,1); unex = us(end,3);
 semilogy(Ns,abs(us(:,1)-ufex),'gs-', Ns,abs(us(:,4)-ufex),'k+-', Ns,abs(us(:,2)-unex),'go-', Ns,abs(us(:,3)-unex),'g*-', Ns,abs(us(:,5)-unex),'k.-');
 legend('far, plain', 'far, QFS-B', 'near, plain', 'near, adaptive', 'near, QFS-B');
-xlabel('n'); ylabel('abs error in u'); axis([Ns(1) Ns(end-1) 1e-15 1]);
+xlabel('N'); ylabel('abs error in u'); axis([Ns(1) Ns(end-1) 1e-15 1]);
 hline(tol,'r:');
 text(Ns(2),tol*5,'QFS $\epsilon$','interpreter','latex','color',[1 0 0]);
-title('(e)   $n$-node Kress $\tau$ solve; various $u$ eval','interpreter','latex');
+title('(e)   $N$-node Kress $\tau$ solve; various $u$ eval','interpreter','latex');
 
 subplot(2,3,6);   % QFS-D conv
 semilogy(Ns,abs(vs(:,2)-ufex),'k+-', Ns,abs(vs(:,3)-unex),'k.-');
 legend('far, QFS-D', 'near, QFS-D');
-xlabel('n'); ylabel('abs error in u'); axis([Ns(1) Ns(end-1) 1e-15 1]);
+xlabel('N'); ylabel('abs error in u'); axis([Ns(1) Ns(end-1) 1e-15 1]);
 hline(tol,'r:');
 text(Ns(2),tol*5,'QFS $\epsilon$','interpreter','latex','color',[1 0 0]);
-title('(f)   $n$-node QFS-D $\tau$ solve and $u$ eval','interpreter','latex');
+title('(f)   $N$-node QFS-D $\tau$ solve and $u$ eval','interpreter','latex');
 
 subplot(2,3,1);   % soln image
 g0 = 2.0; ng = 200; u0 = 2.0;  % potential images:  box size, max u value
@@ -113,7 +113,7 @@ text(real(bp.x(1))+0.1,imag(bp.x(1)),'$\bf{x}_1$','interpreter','latex');
 text(real(bp.x(2))+0.1,imag(bp.x(2)),'$\bf{x}_2$','interpreter','latex');
 plot(t.x, 'm*'); text(real(t.x(1)),imag(t.x(1)),'far');
 text(real(t.x(2)),imag(t.x(2)),'near'); axis equal; axis(v);
-title(sprintf('(b) Nystrom discretization $(n=%d)$',Np),'interpreter','latex');
+title(sprintf('(b) Nystrom discretization $(N=%d)$',Np),'interpreter','latex');
 plot(vz([1 1 2 2 1]),vz([3 4 4 3 3]), '-','color',0.8*[1 1 1]);  % zoom box
 text(vz(2),vz(4),'zoom in (c), (d)','color',0.8*[1 1 1]);
 axis off
@@ -123,7 +123,7 @@ Np=160; bp = wobblycurve(1,a,w,Np);
 o.onsurf=1; qp = qfs_create(bp,false,qfsbker,srcker,tol,o);
 plot([bp.x; bp.x(1)],'k+'); hold on; plot(qp.s.x,'r.');
 axis equal; axis(vz);
-title(sprintf('(c) zoom of QFS-B sources $(n=%d)$',Np),'interpreter','latex');
+title(sprintf('(c) zoom of QFS-B sources $(N=%d)$',Np),'interpreter','latex');
 
 subplot(2,3,5);  % QFS-D geom (same tol)
 Np=160; bp = wobblycurve(1,a,w,Np);
@@ -131,12 +131,15 @@ o.onsurf=0; qp = qfs_create(bp,false,lpker,srcker,tol,o);
 plot([bp.x; bp.x(1)],'k+'); hold on; plot(qp.s.x,'r.');
 plot(qp.bf.x,'b.'); plot(qp.c.x,'g.');
 axis equal; axis(vz);
-title(sprintf('(d) zoom of QFS-D geom $(n=%d)$',Np),'interpreter','latex');
+title(sprintf('(d) zoom of QFS-D geom $(N=%d)$',Np),'interpreter','latex');
 
+% Output
 set(gcf,'paperposition',[0 0 12 7]); print -dpng setup.png
 system('convert setup.png -trim setup_trim.png')
 % now copy to ../../qmf-paper/figs/
-% then import to xfig setup_lab, export as EPS, finally:
+% then import to xfig setup_lab, export as PDF.
+%
+% Or, used to do: export to EPS, finally:
 % convert -density 95.4 setup_lab.eps setup_lab.png
 % (here the resolution matches the size of the original png)
 % ================================================================

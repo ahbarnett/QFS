@@ -17,7 +17,7 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 %  o = options struct:
 %       o.verb = 0,1,... verbosity  (0=silent, >3 plots geom).
 %       o.curvemeth = 'i' imaginary displ, 'n' normal displ, '2' 2nd-order displ
-%       o.srcffac = extra multiplicative p/N srcfac (default 1.0).
+%       o.srcffac = extra multiplicative p/N srcfac ("upsilon", default 1.0).
 %       o.srcfixd = if present enforce (override) imag displacement of src curve
 %                   (needs correct sign), otherwise uses auto-choice (default).
 %       o.chkfac = enforce check upsampling factor (QFS-D only), otherwise auto.
@@ -78,18 +78,19 @@ else
   if o.verb && intersectfun(b,imds,o)==-1, fprintf('qfs_create: o.srcfixd=%.3g self-intersects!\n',imds); end
 end
 ptol = abs(1/imds)*log(1/tola);        % criterion for # src to get adj tol
-srcfac = o.srcffac * max(1.0, ptol/N); % will control p = # srcs (never p<N)
+srcfac = o.srcffac * max(1.0, ptol/N); % will control p = # srcs = srcfac*N
 if o.verb && N*srcfac<0.95*ptol      % here 0.95 fudge factor avoids many msgs
   fprintf('qfs_create: srcfac=%.3g not pred enough for adj tol %.3g at imds=%.3g! (pred err=%.3g)\n',srcfac, tola, imds, exp(-srcfac*N*abs(imds)));
 end
 s = shiftedbdry(b,imds,srcfac,o);      % make src curve (2 params: imds, srcfac)
+%[max(s.w),min(s.w)], s.w = 1+0*s.w;   % show src weights, then make them all 1
 q.b = b; q.s = s;                      % copy out
 
 if o.onsurf     % basic QFS-B, no chk pts needed...
   if o.verb, fprintf('QFS-B N=%3d tol=%5.3g\tsfac=%.2f (p=%d), d=%6.3f\n',N,tol,srcfac,s.N,imds); end
 else   % off-surf: QFS check (colloc) curve, specify by its imag shift (imd)..
   imd = imds*(1-log(eps)/log(tola));    % <0, use in/out ratio, not David 5.7-M
-  if ~isfield(o,'chkfac'), o.chkfac=1.1*srcfac; end   % > # src, for spec(A) Sto
+  if ~isfield(o,'chkfac'), o.chkfac=1.0*srcfac; end   % > # src, for spec(A) Sto
   valid = false; imdo=imd;
   while ~valid                    % move in check curve until valid...
     c = shiftedbdry(b,imd,o.chkfac,o);
@@ -125,8 +126,8 @@ end                    % (differs from David who keeps E N*N, then src upsamp)
 if o.extrarow
   srctotrows = s.w'; bdrytotrows = b.w';                   % Laplace case
   % (note in the paper the srctotrow is ones, but we have weights in the QFS
-  %  rep not notated in the paper)
-  if ncomp==2, srctotrows = [s.w',0*s.w'; 0*s.w',s.w'];    % Stokes (loses nr
+  %  rep that are not notated in the paper)
+  if ncomp==2, srctotrows = [s.w',0*s.w'; 0*s.w',s.w'];    % Stokes (loses 8 nr
     bdrytotrows = [b.w',0*b.w'; 0*b.w',b.w']; end          %  digits but why?)
   E = [E; srctotrows]; cfb = [cfb; bdrytotrows]; 
 end
@@ -137,7 +138,7 @@ if o.factor=='s'       % trunc SVD - guaranteed, but slow
   [U,S,V] = svd(E);
   minsingval = min(diag(S));
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
-  if o.verb>2, fprintf('o.factor=s: E is %dx%d, minsigval=%.3g, epstrunc=%.3g, r=%d\n',size(E,1),size(E,2),minsingval,reps,r); end
+  if o.verb>2, fprintf('o.factor=s: E is %dx%d, minsingval=%.3g, epstrunc=%.3g, r=%d\n',size(E,1),size(E,2),minsingval,reps,r); end
   q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);             % func evals coeffs from dens
   if 0                % experimental only (spit out Qnul)...
@@ -185,6 +186,7 @@ function c = shiftedbdry(b,imagd,fac,o)
 % or simple speed-scaled normal displacement.
 % imagd - controls distance (either actual imag shift, or equiv normal shift).
 %         imagd>0 is in interior. imagd = (2pi/N)*delta from paper.
+% fac   - upsampling factor (P/N) relative to N for given b curve
 % Opts:
 % o.curvemeth = 'i' (imag shift in complex param), 'n' (speed * normal displ),
 %               '2' (as n but w/ 2nd-order term too, using xpp)
