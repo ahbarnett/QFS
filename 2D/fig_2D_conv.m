@@ -25,8 +25,8 @@ s=4.0; trg.x(2) = b.Z(s) - sgn*nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % nr test pt
 trg.x=trg.x(:);
 
 %%%%% LOOP BY HAND OVER THESE 2x2 POSSIBILITIES TO MAKE PAPER FIGS (2,3):
-lp = 'm';         % 'S', 'D', 'm'(=D+S): LP flavor to test (->output filename)
-qfs.onsurf = 0;   % 1 makes QFS-B, 0 for QFS-D
+lp = 'S';         % 'S', 'D', 'm'(=D+S): LP flavor to test (->output filename)
+qfs.onsurf = 1;   % 1 makes QFS-B, 0 for QFS-D
 %%%%%
 
 qfs.factor = 's'; qfs.meth='2'; qfs.verb=1;          % QFS meth pars
@@ -34,14 +34,16 @@ pdes = 'LHS';                                        % PDE types, 1 char each
 pdenam = {'Laplace', sprintf('Helm.%s        k=%g',char(10),khelm), 'Stokes'};
 tols = [1e-4 1e-8 1e-12];
 Ns = 30:30:420;
-fig=figure;
+zeroflux = 0;     % fix stokes flux to zero to test pure-S QFS rep?
 
+fig=figure;
 for ipde=1:3                                         % which PDEs to test
   pde = pdes(ipde); fprintf('PDE=%s: -----------------------\n',pdenam{ipde})
   ncomp = 1 + (pde=='S');           % # vector cmpts dep on PDE type
   side = 'e'; if interior, side = 'i'; end  % LSC2D bary setup for *LPclo
   if pde=='S', qfs.srcffac = 1.3; qfs.chkfac=1.5; end     % Sto bump up, even for QFS-B
   qfs.extrarow = lp~='D' && ~interior && pde=='L';   % fix total chg (if etaS=1)
+  % note can to extrarow for Stokes QFS-D without penalty; QFS-B S only 1e-9 :(
   if pde=='L'                       % wrap the LPs in PDE-indep way
     SLP = @LapSLP; DLP = @LapDLP;
     SLPker = @LapSLPpotker; DLPker = @LapDLPpotker;
@@ -92,11 +94,11 @@ for ipde=1:3                                         % which PDEs to test
     for i=1:numel(Ns), N=Ns(i); %fprintf('\tN=%d:\n',N);
       b = curve(N);           % setup discretization
       dens = densfun(b.t);    % tau vec is our input
-      if pde=='S'             % fix it to zero-flux density (int tau.n = 0)
+      if pde=='S' && zeroflux % fix it to zero-flux density (int tau.n = 0)
         flux = [b.w;b.w]' * (dens.*[real(b.nx);imag(b.nx)]);
         corr = [cos(b.t); 0*b.t];        % something smoother than nx!
         corrflux = [b.w;b.w]' * (corr.*[real(b.nx);imag(b.nx)]);  % nonzero!
-        dens = dens - flux/corrflux * corr;        % do the fix
+        dens = dens - flux/corrflux * corr;        % do the fix; check it...
         %corrflux, checkflux = [b.w;b.w]' * (dens.*[real(b.nx);imag(b.nx)])
       end
       if itol==1              % do the reference (non-QFS) stuff
@@ -115,7 +117,7 @@ for ipde=1:3                                         % which PDEs to test
       elseif pde=='H'      % CFIE to avoid gamma interior resonances
         qfsrep = @(varargin) DLP(varargin{:}) + 1i*khelm*SLP(varargin{:});
       elseif pde=='S'      % S+D since S no source/sink & D no log(r) net force
-        qfsrep = @(varargin) SLP(varargin{:});   % plain S needs user flux=0!
+        qfsrep = @(varargin) SLP(varargin{:}) + DLP(varargin{:});  % revert to S+D; plain S would need user flux=0!
       end
       q = qfs_create(b,interior,LPA,qfsrep,tol,qfs);
       cod = q.qfsco(dens);                 % get QFS src coeffs (str) for dens

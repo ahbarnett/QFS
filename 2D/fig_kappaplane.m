@@ -17,14 +17,11 @@ qfs.onsurf = 0;                   % QFS-D
 qfs.factor = 's'; qfs.meth='2'; qfs.verb=1;          % QFS meth pars
 pdes = 'LHS';                                        % PDE types, 1 char each
 pdenam = {'Laplace', sprintf('Helm.%s        k=%g',char(10),khelm), 'Stokes'};
-tol = 1e-6;
-N = 100;
+tol = 1e-12;
+N = 200;
 b = curve(N);           % setup discretization
-srcfacs=1:0.05:1.5;
-chkfacs=1:0.05:1.6;
 
-fig=figure;
-for ipde=3%1:3                                         % which PDEs to test
+for ipde=3                                       % which PDEs to test
   pde = pdes(ipde); fprintf('PDE=%s: -----------------------\n',pdenam{ipde})
   ncomp = 1 + (pde=='S');           % # vector cmpts dep on PDE type
       
@@ -46,15 +43,16 @@ for ipde=3%1:3                                         % which PDEs to test
     qfsrep = @(varargin) DLP(varargin{:}) + 1i*khelm*SLP(varargin{:});
     LP = @(varargin) DLP(varargin{:}) + 1i*khelm*SLP(varargin{:}); % test CFIE
     lpnam = 'D-ikS';
-  elseif pde=='S'      % pure SLP, enough when source-free
-    qfsrep = @(varargin) SLP(varargin{:}) + DLP(varargin{:});  % D or no? uh-oh
+  elseif pde=='S'      % QFS rep: use S+D (pure S enough when source-free)
+    qfsrep = @(varargin) SLP(varargin{:}) + DLP(varargin{:});  % D or no?
     LP = @(varargin) DLP(varargin{:}) + SLP(varargin{:});   % test D+S completed
     lpnam = 'D+S';
   end
   
-  A0 = LP(b,b) - 0.5*sgn*eye(ncomp*N);
+  srcfacs=1:0.02:1.5;
+  chkfacs=1:0.02:1.6;
+  A0 = LP(b,b) - 0.5*sgn*eye(ncomp*N);     % Kress A matrix
   k0 = cond(A0)
-  subplot(1,numel(pdes),ipde);   % one subplot per PDE...
   kk=nan(numel(srcfacs),numel(chkfacs));        % alloc conv metrics
   for isf = 1:numel(srcfacs)   % sweep over upsampling plane .................
     for icf = 1:numel(chkfacs)
@@ -66,19 +64,36 @@ for ipde=3%1:3                                         % which PDEs to test
       fprintf('srcfac=%.3g\tchkfac=%.3g\tkappa(A)=%.6g\n',qfs.srcffac,qfs.chkfac,kk(isf,icf))
     end
   end
-  h=imagesc(srcfacs,chkfacs,log10(abs(kk'-k0)));
-  colormap(goodbw); caxis([-10 5]);
+  figure; subplot(1,2,1);
+  h=imagesc(srcfacs,chkfacs,log10(kk' / k0));
+  colormap(goodbw);
   colorbar;
   axis xy tight;
   xlabel('$\upsilon$','interpreter','latex');
   ylabel('$\upsilon_c$','interpreter','latex');
-
-  CR = ''; if pde=='H', CR=char(10); end  % insert carriage return
-  text(1.0,max(chkfacs), sprintf('%s(%s) %s %s',CR,char(96+ipde),lpnam,pdenam{ipde}));
+  chkfac0 = 1.5;   % slice val
+  hline(chkfac0);
+  text(1.25,1.55, '(a) $\log_{10} (\kappa(\tilde A)/\kappa(A))$','interpreter','latex');
   drawnow
-end
 
-stop
+%  srcfacs=1:0.05:1.5;
+  qfs.chkfac = chkfac0;   % ................. slice along srcfac only
+  eA = nan(ncomp*N,numel(srcfacs));
+  for isf = 1:numel(srcfacs)   % sweep over upsampling plane .................
+    qfs.srcffac = srcfacs(isf);
+    q = qfs_create(b,interior,LP,qfsrep,tol,qfs);
+    B = qfsrep(b,q.s);   % bdry from src
+    A = (B*q.Q2)*q.Q1;   % QFS nyst approx (BY)Z
+    eA(:,isf) = eig(A);
+    fprintf('srcfac=%.3g\tchkfac=%.3g\tmaxeig(A)=%.6g\n',qfs.srcffac,qfs.chkfac,max(abs(eA(:,isf))))
+  end
+  subplot(1,2,2);
+  plot(srcfacs,abs(eA),'b+');
+  xlabel('$\upsilon$','interpreter','latex');
+  ylabel('$|\lambda_j(\tilde A)|$','interpreter','latex');
+  axis([1 max(srcfacs) 0 3.1]);
+  text(1.25,2.8, '(b) spec($\tilde A$) magnitudes, $\upsilon_c=1.5$','interpreter','latex');
+end
 
 set(gcf,'paperposition',[0 0 12 3]);
 print -dpng tmp.png
