@@ -26,12 +26,15 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %                  'l' (piv-LU Gauss elim. Unstab: large soln norm if ill-cond)
 %                  'r' (trunc rank-revealing randURV, a la Martinsson / Demmel)
 %                  'u' (trunc randUTV, needs matlab interface to randutv)
-%       o.surfmeth = 'd' (given dists, needs o.param = [srcfac,dsrc,bfac,dchk])
-%                    'a' (auto-chosen dists based on maxh & tol, needs
-%                         o.param = [srcfac])
+%       o.surfmeth = 'd' given dists, needs o.param = [srcfac,dsrc,bfac,dchk]
+%       o.surfmeth = 'c' confocal ellipsoid (assuming surf is ellipsoid a,b,c),
+%                         needs o.param = [a,b,c,srcfac,dsrc,bfac,dchk]
+%                    'a' auto-chosen dists based on maxh & tol, needs
+%                         o.param = [srcfac]
 %       o.dscale sets local distance scaling function: 'c' unity (const dists)
 %                    'v' (auto-chosen variable dists based on maxh & tol, needs
 %                         o.param = [srcfac])
+%       o.I  passes in interpmat I, avoids its calc
 %
 % Outputs: q = QFS struct (object), or cell array of such, containing fields:
 %  s - QFS source surf with s.x nodes, s.w weights, and s.nx normals.
@@ -48,6 +51,7 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 % randURV q=1 is 2x faster than SVD on i7, 3x on xeon.
 
 % Barnett 8/21/19, based on 2D qfs_create. Sphere topo 9/5/19, multi-lp 9/6/19
+% reporting 8/14/21
 if nargin==0, test_qfs3d_create; return; end
 if nargin<6, o=[]; end
 if ~isfield(o,'verb'), o.verb = 0; end
@@ -97,7 +101,9 @@ if o.verb>4, qfs_show(q{1}); drawnow; end
 ttot = tic; tic          % fill some big matrices...
 if numlps==1, lpker = {lpker}; end      % pack so can use as cell arrays
 if bfac~=1.0             % bdry upsampling (usual case)
-  I = surfinterpmat(bf,b);              % mat to upsample bf <- b  
+  if ~isfield(o,'I')
+    I = surfinterpmat(bf,b);              % mat to upsample bf <- b
+  else, I = o.I; o=rmfield(o,'I'); end    % assume user passed in I
   if o.verb>1, fprintf('\tfill I\t\t%.3g s\n',toc); end, tic
   for i=1:numlps
     K = lpker{i}(c,bf);  % eval at check from desired upsampled layer pot (c<-bf)
@@ -105,6 +111,7 @@ if bfac~=1.0             % bdry upsampling (usual case)
     cfb{i} = K*I;        % matrix giving check vals from original bdry dens
     if o.verb>1, fprintf('\tcfb=K*I\t\t%.3g s\n',toc); end, tic
   end
+  q{1}.I = I;            % pass out
   clear K I
 else                     % no bdry upsampling
   for i=1:numlps
@@ -126,11 +133,11 @@ if o.factor=='s'       % trunc SVD - stablest, 20x slower than LU :(
     if o.verb>1, fprintf('\tEs=E*Is\t\t%.3g s\n',toc); end, tic
     [U,S,V] = svd(Es);
     r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
-    if o.verb>1, fprintf('\tsvd(Es)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
+    if o.verb>1, fprintf('\tsvd(Es)\t\t%.3g s (rank=%d, minsig=%.3g)\n',toc,r,S(end)); end, tic
   else                 % full (poss rect) E
     [U,S,V] = svd(E);
     r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
-    if o.verb>1, fprintf('\tsvd(E)\t\t%.3g s (rank=%d)\n',toc,r); end, tic
+    if o.verb>1, fprintf('\tsvd(E)\t\t%.3g s (rank=%d, minsig=%.3g)\n',toc,r,S(end)); end, tic
   end
   Q2 = V(:,1:r)*diag(iS); if squarify, Q2 = Is*Q2; end   % 2nd factor
   for i=1:numlps
@@ -138,13 +145,13 @@ if o.factor=='s'       % trunc SVD - stablest, 20x slower than LU :(
     q{i}.qfsco = @(dens) q{i}.Q2*(q{i}.Q1*dens);  % func evals coeffs from dens
   end
   if o.verb>1, fprintf('\tQ1,Q2\t\t%.3g s\n',toc); end
-elseif o.factor=='l'   % LU, David's pref. (Q1,Q2 gets only 1e-9, sq or rect)
+elseif o.factor=='l'   % LU, David's pref.
   if diff(size(E))==0  % square case
     [L,U,P] = lu(E);
     if o.verb>1, fprintf('\tLU(E)\t\t%.3g s\n',toc); end
-    %q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1), not bkw stab!
     for i=1:numlps
       q{i}.qfsco = @(dens) U\(L\(P*(cfb{i}*dens)));  % func taking dens to co
+      %q{i}.Q2 = inv(U); q{i}.Q1 = L\(P*cfb{i});  % square (srcfac=1), not bkw stab ? only to 1e-6, etc
     end
   else                 % rect case, David's projecting to NxN then LU
     Is = surfinterpmat(s,b);                       % mat upsamples N to N_src
@@ -153,7 +160,7 @@ elseif o.factor=='l'   % LU, David's pref. (Q1,Q2 gets only 1e-9, sq or rect)
     if o.verb>1, fprintf('\tLU(E*Is)\t%.3g s\n',toc); end
     %q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);           % Q1,Q2, not bkw stab: avoid
     for i=1:numlps
-      q{i}.qfsco = @(dens) Is*(U\(L\(P*(cfb{i}*dens)))); % func taking dens to co
+      q{i}.qfsco = @(dens) Is*(U\(L\(P*(cfb{i}*dens)))); % func taking dens->co
     end
   end
 elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
@@ -189,7 +196,7 @@ elseif o.factor=='u'   % randUTV, then trunc solve. Real E only (no Helmholtz)
   [U,T,V] = randutv(E);
   r = sum(abs(diag(T))>reps*abs(T(1,1)));
   T=T(1:r,1:r); U=U(:,1:r); V=V(:,1:r);
-  if o.verb>1, fprintf('\trandUTV(E)\t%.3g s (rank=%d)\n',toc,r); end, tic
+  if o.verb>1, fprintf('\trandUTV(E)\t%.3g s (rank=%d, minT=%.3g)\n',toc,r,abs(T(r,r))); end, tic
   for i=1:numlps
     q{i}.qfsco = @(dens) V*(T\(U'*(cfb{i}*dens))); % func taking dens to co
   end
