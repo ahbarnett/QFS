@@ -48,7 +48,7 @@ for j=2:K
 end
 
 
-%%%%%%%%%%%%%55
+%%%%%%%%%%%%%
 function test_ellipsoid_cluster
 E0 = [.5,1,1.5];     % baseline semiaxes
 K=10;   % build cluster of K same shape ellipsoids

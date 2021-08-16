@@ -29,6 +29,7 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %       o.surfmeth = 'd' given dists, needs o.param = [srcfac,dsrc,bfac,dchk]
 %       o.surfmeth = 'c' confocal ellipsoid (assuming surf is ellipsoid a,b,c),
 %                         needs o.param = [a,b,c,srcfac,dsrc,bfac,dchk]
+%                         [not implemented]
 %                    'a' auto-chosen dists based on maxh & tol, needs
 %                         o.param = [srcfac]
 %       o.dscale sets local distance scaling function: 'c' unity (const dists)
@@ -88,7 +89,7 @@ if o.surfmeth=='a'                % dc will be check surf dist...
 elseif o.surfmeth=='d'
   bfac = o.param(3); dc = sign_from_side(interior) * o.param(4);
 end
-c = constshiftbdry(b,dc,1.0,o);
+c = constshiftbdry(b,dc,1.0,o);        % baked-in no chk upsampling
 
 bf = setupsurfquad(b,bfac*[max(Nu),Nv]);        % make upsampled physical surf
 doverh = bfac*abs(dc)/maxh;
