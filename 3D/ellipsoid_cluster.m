@@ -1,12 +1,13 @@
-function [E R t] = ellipsoid_cluster(E0,K,dmin)
+function [E R t xnear] = ellipsoid_cluster(E0,K,dmin)
 % ELLIPSOID_CLUSTER   grow random dmin-close cluster ellipsoids, same semiaxes
 %
-% [E R t] = ellipsoid_cluster(E0,K,dmin) returns cell arrays defining K
+% [E R t xnear] = ellipsoid_cluster(E0,K,dmin) returns cell arrays defining K
 %  ellipsoids of random rotations and locations, but achieving close to dmin
 %  distance between each an at least one other.
 %  E0 = [a b c] semiaxes of all ellipsoids (same shape).
 %  Output jth ellipsoid defined by semiaxes E{j}, rotation 3x3 matrix R{j},
-%  and translation center t{j}.
+%  and translation center t{j}. xnear{j} lists point of nearest touching
+%  on the jth ellipsoid, as a 3x1 vector (apart from j=1 which is empty).
 %
 % Without arguments, does self test with pic
 
@@ -17,7 +18,7 @@ if nargin==0, test_ellipsoid_cluster; return; end
 Rz = @(t) [cos(t) -sin(t) 0;sin(t) cos(t) 0; 0 0 1];  % z-ax rot mat
 Ry = @(t) [cos(t) 0 -sin(t); 0 1 0; sin(t) 0 cos(t)];  % y-ax rot mat
 
-t{1} = zeros(3,1); R{1} = eye(3); E{1} = E0;  % object 1
+t{1} = zeros(3,1); R{1} = eye(3); E{1} = E0; xnear{1} = [];   % object 1
 for j=2:K
   fprintf('starting ellipsoid j=%d...\n',j)
   
@@ -45,6 +46,7 @@ for j=2:K
   [d,x,y,i] = min_dist_ellipsoids(E{j},R{j},s*dir,E(1:j-1),R(1:j-1),t(1:j-1));
   fprintf('\tellipsoid j=%d achieved dist %g from i=%d\n',j,d,i)
   t{j} = s*dir;
+  xnear{j} = x;
 end
 
 
@@ -54,10 +56,11 @@ E0 = [.5,1,1.5];     % baseline semiaxes
 K=10;   % build cluster of K same shape ellipsoids
 dmin = 0.01;    % target dist of each to prev ellipsoids
 rng(0);    % seed
-tic; [E R t] = ellipsoid_cluster(E0,K,dmin); toc     % do it
+tic; [E R t xnear] = ellipsoid_cluster(E0,K,dmin); toc     % do it
 
 figure; for j=1:K                 % show it
   colorvec = mod(j*[.42,.1,.29],1);   % some irrationals so colors unique
   show_ellipsoid(E{j},R{j},t{j},colorvec); hold on;
+  x = xnear{j}; if ~isempty(x), plot3(x(1),x(2),x(3),'k.','markersize',20); end
   text(t{j}(1),t{j}(2),t{j}(3),sprintf('%d',j), 'fontsize',20);
 end

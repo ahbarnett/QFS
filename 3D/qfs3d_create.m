@@ -25,7 +25,7 @@ function q = qfs3d_create(b,interior,lpker,srcker,tol,o)
 %                  'b' (do a LU backsolve with E matrix each time, like 'l')
 %                  'l' (piv-LU Gauss elim. Unstab: large soln norm if ill-cond)
 %                  'r' (trunc rank-revealing randURV, a la Martinsson / Demmel)
-%                  'u' (trunc randUTV, needs matlab interface to randutv)
+%                  'u' (trunc randUTV, needs matlab interface to randutv, real)
 %       o.surfmeth = 'd' given dists, needs o.param = [srcfac,dsrc,bfac,dchk]
 %       o.surfmeth = 'c' confocal ellipsoid (assuming surf is ellipsoid a,b,c),
 %                         needs o.param = [a,b,c,srcfac,dsrc,bfac,dchk]
@@ -151,17 +151,21 @@ elseif o.factor=='l'   % LU, David's pref.
     [L,U,P] = lu(E);
     if o.verb>1, fprintf('\tLU(E)\t\t%.3g s\n',toc); end
     for i=1:numlps
-      q{i}.qfsco = @(dens) U\(L\(P*(cfb{i}*dens)));  % func taking dens to co
+      Pcfb = P*cfb{i};    % this is done dense, sadly. Saves 1 matvec in apply.
+      q{i}.qfsco = @(dens) U\(L\(Pcfb*dens));  % func taking dens to co, stable
+      q{i}.X = U\(L\Pcfb);      % 1-matvec, more acc than 2 for LU! not v stable
       %q{i}.Q2 = inv(U); q{i}.Q1 = L\(P*cfb{i});  % square (srcfac=1), not bkw stab ? only to 1e-6, etc
     end
   else                 % rect case, David's projecting to NxN then LU
     Is = surfinterpmat(s,b);                       % mat upsamples N to N_src
     if o.verb>1, fprintf('\tfill Is\t\t%.3g s\n',toc); end, tic
-    [L,U,P] = lu(E*Is);
+    [L,U,P] = lu(E*Is);             % smaller square
     if o.verb>1, fprintf('\tLU(E*Is)\t%.3g s\n',toc); end
-    %q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);           % Q1,Q2, not bkw stab: avoid
+    %q.Q2 = Is\U; q.Q1 = L\(P*cfb);           % Q1,Q2, not bkw stab: avoid
     for i=1:numlps
-      q{i}.qfsco = @(dens) Is*(U\(L\(P*(cfb{i}*dens)))); % func taking dens->co
+      Pcfb = P*cfb{i};
+      q{i}.qfsco = @(dens) Is*(U\(L\(Pcfb*dens))); % func taking dens->co
+      q{i}.X = Is*(U\(L\Pcfb)); % 1-matvec, more acc than 2 for LU! not v stable
     end
   end
 elseif o.factor=='q'   % QR: plain no more stable than LU max(d/h)>5, p-QR is
@@ -287,12 +291,12 @@ end
 %o.minunodes = 16;      % helps sphere-like poles?
 b = setupsurfquad(b,N,o);
 interior = false;
-for lp='D' %'SD', lp             % .... loop over layer pot types
+for lp='SD', lp             % .... loop over layer pot types
   if lp=='S',     lpker = @Lap3dSLPmat; lpfun = @slpfun;   % lpfun for adaptive
   elseif lp=='D', lpker = @Lap3dDLPmat; lpfun = @dlpfun;
   end
   srcker = @Lap3dSLPmat;             % either S/D fine for Laplace
-  o.verb = verb; o.factor = 'u';     % E factor method
+  o.verb = verb; o.factor = 'l';     % E factor method
   q = qfs3d_create(b,interior,lpker,srcker,tol,o);
   if b.topo=='t'
     densfun = @(u,v) 1+cos(u+.4)+sin(3*u - 2*v + 2 + cos(u+v+1));  % doubly-peri

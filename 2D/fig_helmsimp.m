@@ -16,6 +16,7 @@ refker = @(varargin) HelmDLPpotker(k,varargin{:}) -1i*eta_CFIE*HelmSLPpotker(k,v
 % QFS params...
 tol = 1e-12;
 o.verb = 1; o.curvemeth='2'; %o.srcffac = 1.05;  % makes little diff
+o.factor = 's';        % 'l' is possible too but need to change form A below.
 qfsbker = @(b,varargin) lpker(b,varargin{:}) + 0.5*eye(b.N);  % JR, QFS-B only
 srcker = @(varargin) HelmDLP(k,varargin{:}) -1i*eta_CFIE*HelmSLP(k,varargin{:});
 %srcker = @(varargin) HelmSLP(k,varargin{:});  % plain charge sources
@@ -60,7 +61,9 @@ for i=1:numel(Ns); N=Ns(i);   % ..................
   fprintf('\tnr:  Re u ada %.12g \tqfs-b %.12g\tdiff %.3g\n',real(us(i,3)), real(us(i,5)), abs(us(i,3)-us(i,5)))
   % QFS-D...
   o.onsurf=0; qd = qfs_create(b,false,lpker,srcker,tol,o);
-  A = (srcker(b,qd.s)*qd.Q2)*qd.Q1;          % BIE matrix - best way? ***
+  A = (srcker(b,qd.s)*qd.Q2)*qd.Q1;          % BIE matrix - stable for SVD fact
+  %A = srcker(b,qd.s)*(qd.Q2*qd.Q1);  %  Atilde=BX stops at 1e-10 for tol=1e-14
+  %A = (srcker(b,qd.s)/qd.U)*qd.iLPcfb;          % stable BIE matrix for LU fact
   dens = A\f;                         % solve w/ QFS-D mat
   vs(i,4) = dens(1);               % 1st node @ s=0 always (no dens interp)
   cod = qd.qfsco(dens);
@@ -133,6 +136,7 @@ plot(qp.bf.x,'b.'); plot(qp.c.x,'g.');
 axis equal; axis(vz);
 title(sprintf('(d) zoom of QFS-D geom $(N=%d)$',Np),'interpreter','latex');
 
+stop
 % Output
 set(gcf,'paperposition',[0 0 12 7]); print -dpng setup.png
 system('convert setup.png -trim setup_trim.png')

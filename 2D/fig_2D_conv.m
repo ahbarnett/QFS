@@ -25,8 +25,8 @@ s=4.0; trg.x(2) = b.Z(s) - sgn*nrdist * (b.Zp(s)/1i)/abs(b.Zp(s));  % nr test pt
 trg.x=trg.x(:);
 
 %%%%% LOOP BY HAND OVER THESE 2x2 POSSIBILITIES TO MAKE PAPER FIGS (2,3):
-lp = 'S';         % 'S', 'D', 'm'(=D+S): LP flavor to test (->output filename)
-qfs.onsurf = 1;   % 1 makes QFS-B, 0 for QFS-D
+lp = 'm';         % 'S', 'D', 'm'(=D+S): LP flavor to test (->output filename)
+qfs.onsurf = 0;   % 1 makes QFS-B, 0 for QFS-D
 %%%%%
 
 qfs.factor = 's'; qfs.meth='2'; qfs.verb=1;          % QFS meth pars
@@ -121,6 +121,8 @@ for ipde=1:3                                         % which PDEs to test
       end
       q = qfs_create(b,interior,LPA,qfsrep,tol,qfs);
       cod = q.qfsco(dens);                 % get QFS src coeffs (str) for dens
+      %cod = q.Q2*(q.Q1*dens);     % test 2-matvec version for stability
+      %cod = q.X*dens;             % test 1-matvec version for stability
       u(i,:) = cmpak(qfsrep(trg,q.s,cod),ncomp);   % QFS: eval (all trg), done
     end
     eu0 = abs(u0-u0(end,:)); eu = abs(u-u0(end,:));    % errors (vs ref u0)

@@ -33,9 +33,11 @@ function q = qfs_create(b,interior,lpker,srcker,tol,o)
 % Outputs: QFS struct (object) q containing fields:
 %  s - QFS source curve with s.x nodes, s.w weights, and s.nx normals.
 %  qfsco - function handle returning QFS src density coeffs from bdry density
-%          (also works for stacks of densities as cols)
+%          (also works for stacks of densities as cols). Most stable.
 %  Q1, Q2 - two matrix factors of sfb matrix, maybe needed for qfsco
-%           so that qfssrcdens = Q2*(Q1*givenbdrydens). LU doesn't use them.
+%           so that qfssrcdens = Q2*(Q1*givenbdrydens). 'l','n' don't form.
+%  X - ('l', 'n'), one matrix factor of sfb, generally unstable (1e-8 dies),
+%           qfssrcdens = X*givenbdrydens
 %
 % With no arguments, self-test is done.
 %
@@ -51,7 +53,7 @@ if ~isfield(o,'verb'), o.verb = 0; end
 if ~isfield(o,'onsurf'), o.onsurf = 0; end
 if ~isfield(o,'srcffac'), o.srcffac=1.0; end
 if ~isfield(o,'factor'), o.factor = 's'; end
-if ~isfield(o,'curvemeth'), o.curvemeth='i'; end
+if ~isfield(o,'curvemeth'), o.curvemeth='2'; end   % was 'i'
 if ~isfield(o,'extrarow'), o.extrarow=0; end
 N = b.N; if mod(N,2), error('b.N must be even for now!'); end    % # user nodes
 if tol>1, error('tol should be <1!'); end
@@ -139,7 +141,7 @@ if o.factor=='s'       % trunc SVD - guaranteed, but slow
   minsingval = min(diag(S));
   r = sum(diag(S)>reps*S(1,1)); S = diag(S); S = S(1:r); iS = 1./S;  % r=rank
   if o.verb>2, fprintf('o.factor=s: E is %dx%d, minsingval=%.3g, epstrunc=%.3g, r=%d\n',size(E,1),size(E,2),minsingval,reps,r); end
-  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors
+  q.Q2 = V(:,1:r)*diag(iS); q.Q1 = U(:,1:r)'*cfb; % the 2 factors (for stab)
   q.qfsco = @(dens) q.Q2*(q.Q1*dens);             % func evals coeffs from dens
   if 0                % experimental only (spit out Qnul)...
     if o.onsurf
@@ -153,19 +155,24 @@ if o.factor=='s'       % trunc SVD - guaranteed, but slow
     end
   end
 elseif o.factor=='n'     % naive version of 's', unstable since 1 matvec.
-  X = E\cfb;                    % *** bad way (math correct)
-  q.Q1 = eye(N*ncomp); q.Q2 = X;
+  q.X = E\cfb;                    % *** bad way (math correct)
   q.qfsco = @(dens) X*dens;     % func evals coeffs from dens, bad way
-elseif o.factor=='l'   % David's preferred. Q1,Q2 gets only 1e-9, sq or rect
+elseif o.factor=='l'   % David's preferred. Q1,Q2 gets only 7-9 digs, sq or rect
   if diff(size(E))==0           % square case
-    Is = eye(N*ncomp);          % dummy for qfsco below
-    [L,U,P] = lu(E); q.Q2 = inv(U); q.Q1 = L\(P*cfb);   % square (srcfac=1)
-  else                 % rect case, David's projecting to NxN
+    [L,U,P] = lu(E);
+    Pcfb = P*cfb;                 % saves an extra matvec in qfsco apply
+    %q.Q2 = inv(U); q.Q1 = L\Pcfb;   % square (srcfac=1) worse than q.X
+    q.X = U\(L\Pcfb);   % 1-matvec, gets 1e-11 for Helm vs 2-matvec split only 1e-7! still, not v stable
+    q.U=U; q.iLPcfb = L\Pcfb;        % experimental LU outputs for nyst A fill?
+    q.qfsco = @(dens) U\(L\(Pcfb*dens));       % func evals coeffs from dens
+  else                 % rect case (Nsrc>N), David's projecting to NxN
     Is = perispecinterpmat(s.N,N);     % mat to upsample from N to N_src
-    [L,U,P] = lu(E*Is);
-    q.Q2 = Is*inv(U); q.Q1 = L\(P*cfb);           % Q1,Q2 *not* bkw stab: avoid
+    Is = kron(eye(ncomp), Is);
+    [L,U,P] = lu(E*Is);                 % smaller square LU
+    Pcfb = P*cfb;
+    q.X = Is*(U\(L\Pcfb));   % 1-matvec, only 1e-10 for Helm vs 2-matvec split only 1e-7! still, not v stable, avoid
+    q.qfsco = @(dens) Is*(U\(L\(Pcfb*dens)));  % func evals coeffs from dens
   end
-  q.qfsco = @(dens) Is*(U\(L\(P*(cfb*dens))));    % func evals coeffs from dens
 elseif o.factor=='q'   % QR, was not good for fat nor square...
   [Q,R] = qr(E); q.Q2 = pinv(R); q.Q1 = Q'*cfb;   % *** test
   %[Q,R] = qr(E',0); q.Q2 = Q; q.Q1 = (R\cfb')';  % turn fat into tall ** debug
